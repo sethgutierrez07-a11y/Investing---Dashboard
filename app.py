@@ -133,6 +133,7 @@ def main():
             height=80,
         )
         tickers = [t.strip().upper() for t in tickers_input.split(",") if t.strip()]
+        st.session_state["watchlist"] = tickers  # shared with the Daily Brief page
         st.caption(f"Tracking {len(tickers)} ticker(s).")
         st.caption("Prices refresh automatically every 60 seconds you have the page open; reopen the page anytime for the latest.")
 
