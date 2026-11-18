@@ -197,6 +197,11 @@ def main():
                     col2.caption(f"Based on {pt.get('lastUpdated', 'recent')} data.")
                 else:
                     col2.info("No price target data available.")
+            except requests.exceptions.HTTPError as e:
+                if e.response is not None and e.response.status_code == 403:
+                    col2.info("Price targets aren't included on the free Finnhub plan.")
+                else:
+                    col2.warning(f"Couldn't load price target: {e}")
             except Exception as e:
                 col2.warning(f"Couldn't load price target: {e}")
 
