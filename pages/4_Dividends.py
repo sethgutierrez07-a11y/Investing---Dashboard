@@ -10,6 +10,8 @@ import time
 import pandas as pd
 import streamlit as st
 
+import ui
+
 import dividend_charts as dc
 import dividend_data as dd
 import dividend_lib as dl
@@ -18,6 +20,7 @@ import holdings_lib as hl
 import portfolio_state as ps
 
 st.set_page_config(page_title="Dividends", layout="wide")
+ui.apply()
 
 CHART_CFG = {"displayModeBar": False}
 MAX_HISTORIES = 20  # tickers whose dividend history we load (cached 12h)

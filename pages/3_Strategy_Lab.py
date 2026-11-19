@@ -11,12 +11,15 @@ the rule beat luck, and a counter tracks how many variations you have tried.
 
 import streamlit as st
 
+import ui
+
 import lab_charts as lc
 import lab_lib as lab
 import lab_text as lt
 import price_data as pdx
 
 st.set_page_config(page_title="Strategy Lab", layout="wide")
+ui.apply()
 
 CHART_CFG = {"displayModeBar": False}
 
