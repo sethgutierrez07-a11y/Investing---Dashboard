@@ -76,3 +76,17 @@ def test_split_stocks_and_funds():
     stocks, funds = il.split_stocks_funds(["VOO", "AAPL", "FXAIX", "NVDA", "QQQ", "BAD"], cls,
                                           {"NVDA": "NVIDIA", "QQQ": "", "BAD": "Error: boom"})
     assert stocks == ["AAPL", "NVDA", "BAD"] and funds == ["VOO", "FXAIX", "QQQ"]
+
+
+def test_consensus_slices_order_colours_and_zero_filter():
+    s = il.consensus_slices({"strongBuy": 12, "buy": 15, "hold": 6, "sell": 0, "strongSell": 1})
+    assert [x[0] for x in s] == ["Strong Buy", "Buy", "Hold", "Strong Sell"]   # best to worst, no empty Sell
+    assert [x[1] for x in s] == [12, 15, 6, 1]
+    assert s[0][2] == "#0f6b2a" and s[-1][2] == "#9b1c1c"
+    assert il.consensus_slices({}) == [] and il.consensus_slices(None) == []
+
+
+@pytest.mark.parametrize("score,label", [(None, "No ratings"), (1.8, "Strong Buy"), (1.0, "Leans Buy"), (0.0, "Hold"),
+                                          (-1.0, "Leans Sell"), (-1.9, "Strong Sell")])
+def test_consensus_verdict(score, label):
+    assert il.consensus_verdict(score) == label

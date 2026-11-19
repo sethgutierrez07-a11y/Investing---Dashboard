@@ -112,6 +112,7 @@ def stub_plotly_if_missing():
     go = types.ModuleType("plotly.graph_objects")
     go.Figure = Fig
     go.Bar = lambda **k: k
+    go.Pie = lambda **k: k
     pkg = types.ModuleType("plotly")
     pkg.graph_objects = go
     sys.modules["plotly"], sys.modules["plotly.graph_objects"] = pkg, go

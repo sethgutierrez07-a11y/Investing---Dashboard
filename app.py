@@ -98,30 +98,34 @@ def fetch_profile(symbol: str, api_key: str) -> dict:
     return r.json()
 
 
-def render_consensus_bar(trend: dict):
-    labels = ["Strong Buy", "Buy", "Hold", "Sell", "Strong Sell"]
-    values = [
-        trend.get("strongBuy", 0),
-        trend.get("buy", 0),
-        trend.get("hold", 0),
-        trend.get("sell", 0),
-        trend.get("strongSell", 0),
-    ]
-    colors = ["#1a7f37", "#4caf50", "#ffb020", "#e05252", "#9b1c1c"]
+def render_consensus_donut(trend: dict):
+    """Share of analysts per rating. Hover shows the head-count; the middle shows the consensus score."""
+    slices = il.consensus_slices(trend)
+    total = sum(n for _, n, _ in slices)
+    score = il.bl.analyst_score(trend)
     fig = go.Figure(
-        go.Bar(
-            x=values,
-            y=labels,
-            orientation="h",
-            marker_color=colors,
-            text=values,
+        go.Pie(
+            labels=[s[0] for s in slices],
+            values=[s[1] for s in slices],
+            marker=dict(colors=[s[2] for s in slices], line=dict(color="#ffffff", width=2)),
+            hole=0.6,
+            sort=False,  # keep Strong Buy -> Strong Sell order
+            direction="clockwise",
+            textinfo="value",
             textposition="outside",
+            hovertemplate="%{label}: %{value} analysts (%{percent})<extra></extra>",
         )
     )
     fig.update_layout(
-        height=220,
+        height=260,
         margin=dict(l=10, r=10, t=10, b=10),
-        xaxis_title="Number of analysts",
+        legend=dict(orientation="v", y=0.5),
+        annotations=[
+            dict(
+                text=(f"<b>{il.consensus_verdict(score)}</b><br>{score:+.2f} · {total} analysts" if score is not None else "No ratings"),
+                x=0.5, y=0.5, showarrow=False, font=dict(size=14),
+            )
+        ],
     )
     return fig
 
@@ -191,7 +195,7 @@ def render_stock_tab(symbol, api_key):
 
     if trend_data:
         latest = trend_data[0]
-        col1.plotly_chart(render_consensus_bar(latest), width="stretch")
+        col1.plotly_chart(render_consensus_donut(latest), width="stretch")
         col1.caption(f"As of period ending {latest.get('period', 'unknown')}.")
     else:
         col1.info("No analyst recommendation data available for this ticker.")

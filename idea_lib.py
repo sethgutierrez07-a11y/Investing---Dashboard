@@ -235,3 +235,37 @@ def split_stocks_funds(symbols: list[str], class_by_symbol: dict[str, str], name
             n = (names.get(s) or "").strip()
             (stocks if n else funds).append(s)
     return stocks, funds
+
+
+# ---- analyst consensus ring ----
+RATING_ORDER = [  # key, label, colour (dark green -> light green -> neutral gray -> red -> dark red)
+    ("strongBuy", "Strong Buy", "#0f6b2a"),
+    ("buy", "Buy", "#4caf50"),
+    ("hold", "Hold", "#9aa0a6"),
+    ("sell", "Sell", "#e05252"),
+    ("strongSell", "Strong Sell", "#9b1c1c"),
+]
+
+
+def consensus_slices(trend: dict) -> list[tuple[str, int, str]]:
+    """(label, analysts, colour) in best-to-worst order; ratings nobody gave are left out."""
+    out = []
+    for key, label, colour in RATING_ORDER:
+        n = int((trend or {}).get(key, 0) or 0)
+        if n > 0:
+            out.append((label, n, colour))
+    return out
+
+
+def consensus_verdict(score: float | None) -> str:
+    if score is None:
+        return "No ratings"
+    if score >= 1.5:
+        return "Strong Buy"
+    if score >= 0.5:
+        return "Leans Buy"
+    if score > -0.5:
+        return "Hold"
+    if score > -1.5:
+        return "Leans Sell"
+    return "Strong Sell"
