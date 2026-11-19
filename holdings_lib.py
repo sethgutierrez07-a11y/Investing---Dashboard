@@ -12,6 +12,7 @@ Personal keys do NOT use userId / userSecret and must not call registerUser.
 from __future__ import annotations
 
 import hmac
+from collections.abc import Mapping
 from typing import Any, Callable
 
 import pandas as pd
@@ -32,9 +33,9 @@ def to_plain(obj: Any) -> Any:
     """Turn SDK response objects into plain dicts/lists (so they can be cached)."""
     if obj is None or isinstance(obj, (str, int, float, bool)):
         return obj
-    if isinstance(obj, dict):
+    if isinstance(obj, Mapping):  # dict, frozendict, and other dict-likes
         return {k: to_plain(v) for k, v in obj.items()}
-    if isinstance(obj, (list, tuple)):
+    if isinstance(obj, (list, tuple, set, frozenset)):
         return [to_plain(v) for v in obj]
     for attr in ("to_dict", "model_dump", "dict"):
         fn = getattr(obj, attr, None)
@@ -71,6 +72,36 @@ def first(obj: Any, *paths: tuple[str, ...], default: Any = None) -> Any:
     return default
 
 
+LIST_KEYS = ("positions", "balances", "accounts", "data", "items", "results")
+
+
+def as_list(obj: Any, keys: tuple[str, ...] = LIST_KEYS) -> list:
+    """Accept a list, or a dict that wraps one under a common key. Anything else -> []."""
+    if isinstance(obj, (list, tuple)):
+        return list(obj)
+    if isinstance(obj, dict):
+        for k in keys:
+            if isinstance(obj.get(k), (list, tuple)):
+                return list(obj[k])
+        lists = [v for v in obj.values() if isinstance(v, (list, tuple))]
+        if len(lists) == 1:  # a dict with exactly one list inside: that's the payload
+            return list(lists[0])
+    return []
+
+
+def describe_shape(obj: Any, depth: int = 4) -> Any:
+    """Outline of a payload: field names and types only, never values."""
+    if isinstance(obj, dict):
+        if depth <= 0:
+            return "dict"
+        return {str(k): describe_shape(v, depth - 1) for k, v in list(obj.items())[:30]}
+    if isinstance(obj, (list, tuple)):
+        if not obj:
+            return "list (empty)"
+        return [f"list of {len(obj)}", describe_shape(obj[0], depth - 1)] if depth > 0 else "list"
+    return type(obj).__name__
+
+
 def num(x: Any) -> float | None:
     try:
         if x is None or isinstance(x, bool):
@@ -93,7 +124,11 @@ def account_label(account: dict) -> str:
 def normalize_positions(account: dict, raw_positions: list[dict]) -> list[dict]:
     label = account_label(account)
     rows = []
-    for p in raw_positions or []:
+    for p in as_list(raw_positions, ("positions",)):
+        if not isinstance(p, dict):
+            continue
+        if "units" not in p and "fractional_units" not in p and isinstance(p.get("position"), dict):
+            p = p["position"]  # some shapes nest each position one level down
         ticker = first(
             p,
             ("symbol", "symbol", "symbol"),
@@ -135,7 +170,9 @@ def normalize_positions(account: dict, raw_positions: list[dict]) -> list[dict]:
 def cash_from_balances(raw_balances: list[dict]) -> dict[str, float]:
     """{'USD': 123.45} — sums cash per currency code."""
     out: dict[str, float] = {}
-    for b in raw_balances or []:
+    for b in as_list(raw_balances, ("balances",)):
+        if not isinstance(b, dict):
+            continue
         code = first(b, ("currency", "code"), default="USD")
         cash = num(b.get("cash"))
         if cash is not None:
@@ -162,8 +199,8 @@ def build_portfolio(per_account: list[dict]) -> dict:
         if item.get("error"):
             warnings.append(f"{label}: couldn't load ({item['error']})")
             continue
-        acct_rows = normalize_positions(acct, item.get("positions") or [])
-        cash = cash_from_balances(item.get("balances") or [])
+        acct_rows = normalize_positions(acct, item.get("positions"))
+        cash = cash_from_balances(item.get("balances"))
         non_usd = {k: v for k, v in cash.items() if k != "USD" and v}
         if non_usd:
             warnings.append(f"{label}: non-USD cash ({', '.join(non_usd)}) is not included in totals.")
@@ -178,7 +215,7 @@ def build_portfolio(per_account: list[dict]) -> dict:
                 f"{label}: positions + cash differ from the account total SnapTrade reports by more "
                 f"than 2%. Treat these numbers as approximate."
             )
-        if (item.get("positions") or []) and not acct_rows:
+        if as_list(item.get("positions"), ("positions",)) and not acct_rows:
             warnings.append(f"{label}: positions came back but none could be read. Data shape may have changed.")
 
     df = pd.DataFrame(rows, columns=POSITION_COLS)
@@ -276,14 +313,20 @@ def make_client(client_id: str, consumer_key: str):
 def fetch_all(client: Any, on_error: Callable[[Exception], str] = lambda e: type(e).__name__) -> list[dict]:
     """Read accounts, then balances and positions per account. One bad account
     never hides the others. Only read endpoints are called."""
-    accounts = unwrap(client.account_information.list_user_accounts()) or []
+    accounts = as_list(unwrap(client.account_information.list_user_accounts()), ("accounts",))
     out = []
     for acct in accounts:
-        item: dict = {"account": acct, "positions": [], "balances": [], "error": None}
+        if not isinstance(acct, dict):
+            continue
+        item: dict = {"account": acct, "positions": [], "balances": [], "error": None, "shape": {}}
         aid = acct.get("id")
         try:
-            item["balances"] = unwrap(client.account_information.get_user_account_balance(account_id=aid)) or []
-            item["positions"] = unwrap(client.account_information.get_all_account_positions(account_id=aid)) or []
+            item["balances"] = unwrap(client.account_information.get_user_account_balance(account_id=aid))
+            item["positions"] = unwrap(client.account_information.get_all_account_positions(account_id=aid))
+            item["shape"] = {
+                "balances": describe_shape(item["balances"]),
+                "positions": describe_shape(item["positions"]),
+            }
         except Exception as e:  # noqa: BLE001 — report, don't crash the page
             item["error"] = on_error(e)
         out.append(item)
