@@ -18,18 +18,22 @@ import brief_lib as bl
 import deep_charts as dc
 import deep_lib as dlib
 import deep_text as dtx
+import fit_lib as fl
 import hold_lib as hl
 import dividend_lib as dl
 import idea_lib as il
 import idea_state as ist
 import lab_charts as lc
 import portfolio_state as ps
+import score_lib as sl
 
 st.set_page_config(page_title="Stock Deep-Dive", layout="wide")
 ui.apply()
 
 CHART_CFG = {"displayModeBar": False}
 ICON = {"Good": "🟢 Good", "OK": "🟡 OK", "Watch": "🟠 Watch", "": "—"}
+FIT_ICON = {"pass": "✅ Meets", "fail": "❌ Misses", "unknown": "❔ Can't tell"}
+sl_read = {"good": "Good", "ok": "OK", "watch": "Watch"}
 
 
 # ---------- Cached loaders ----------
@@ -152,6 +156,12 @@ held_ctx = dlib.held_context(symbol, weights) if portfolio else None
 windows = hl.history_windows(prices, divs) if len(prices) else []
 recov = hl.recoveries(prices, divs) if len(prices) else None
 hz = hl.horizon(stats, recov, ev, fund, metrics)
+sc = sl.scorecard(metrics, stats, fund)
+size_label = (dlib.size_bucket((profile or {}).get("marketCapitalization") or dlib.metric(metrics, "mcap")) or (None,))[0]
+fit_prefs = fl.prefs_from(st.session_state)
+fit_rows = fl.check(fit_prefs, fl.build_context(hz=hz, stats=stats, div=div, metrics_get=lambda k: dlib.metric(metrics, k), size=size_label,
+                                                  weight=(held_ctx["weight"] or 0.0) if held_ctx else None))
+fit_sum = fl.summary(fit_rows)
 
 # ---------- Header ----------
 name = (profile or {}).get("name") or symbol
@@ -179,6 +189,14 @@ tile(cols[2], "P/E", f"{pe:.1f}" if pe is not None else "n/a", help="Price per d
 dy = dlib.metric(metrics, "div_yield")
 tile(cols[3], "Dividend yield", f"{dy:.2f}%" if dy else "none", help="Yearly dividend as a share of the price.")
 tile(cols[4], "1-year return", pc(stats["1Y"], 1, True) if stats and stats.get("1Y") is not None else "n/a", help="Price change plus dividends over the past year.")
+
+c_score, c_fit = st.columns(2)
+with c_score.container(border=True):
+    st.metric("Scorecard", f"{sc['score']} / 100" if sc else "n/a", sc["label"] if sc else ("funds aren't scored" if fund else "not enough data"), delta_color="off",
+              help="Five areas (value, growth, profit, safety, price & trend) averaged into one number. Details in the Scorecard tab.")
+with c_fit.container(border=True):
+    st.metric("Fit for you", fit_sum["verdict"] or "n/a", f"{fit_sum['pass']} of {fit_sum['checked']} of your rules" if fit_sum["checked"] else "set your rules in the Fit for you tab",
+              delta_color="off", help="How this stock matches the rules you set. They start from common values; change them in the Fit for you tab.")
 
 # ---------- Written summary (first, like the other pages) ----------
 sections = dict(dtx.write_summary(symbol, profile=profile, quote=quote, metrics=metrics, ev=ev, stats=stats, trends=trends, held=held_ctx, fund=fund))
@@ -213,8 +231,8 @@ st.caption("Written by rules from the numbers on this page, with no AI. Describe
 st.divider()
 
 # ---------- Details ----------
-tabs = st.tabs(["📊 Key numbers", "📈 Price, risk & dividends", "⏳ How long to hold", "🧑‍🏫 Analysts & news", "🧮 How it's scored"])
-t_keys, t_price, t_hold, t_people, t_rules = tabs
+tabs = st.tabs(["📊 Key numbers", "🏅 Scorecard", "🎯 Fit for you", "📈 Price, risk & dividends", "⏳ How long to hold", "🧑‍🏫 Analysts & news", "🧮 How it's scored"])
+t_keys, t_score, t_fit, t_price, t_hold, t_people, t_rules = tabs
 
 with t_keys:
     rows = dlib.key_numbers(metrics)
@@ -235,6 +253,44 @@ with t_keys:
         with st.expander("Everything Finnhub returned"):
             raw = pd.DataFrame(sorted((k, v) for k, v in metrics.items() if isinstance(v, (int, float)) and not isinstance(v, bool)), columns=["Field", "Value"])
             st.dataframe(raw, hide_index=True, width="stretch")
+
+with t_score:
+    for b in dtx.score_summary(symbol, sc, fund):
+        st.markdown(f"- {ui.esc(b)}")
+    if sc:
+        st.plotly_chart(dc.score_bars(sc["areas"], mode), width="stretch", config=CHART_CFG)
+        st.dataframe(pd.DataFrame([{"Area": a["name"], "Score": a["score"], "Measures": a["n"], "What it asks": a["note"]} for a in sc["areas"]]),
+                     hide_index=True, width="stretch", column_config={"Score": st.column_config.ProgressColumn("Score", format="%.0f", min_value=0, max_value=100)})
+        for a in sc["areas"]:
+            with st.expander(f"{a['name']}: {a['score']:.0f}"):
+                st.dataframe(pd.DataFrame([{"Measure": i["label"], "Value": i["shown"], "Read": ICON[sl_read[i["grade"]]]} for i in a["items"]]), hide_index=True, width="stretch")
+    st.caption("Each measure counts Good = 100, OK = 60, Watch = 20; an area is the average of its measures. How it works is in the How it's scored tab.")
+
+with t_fit:
+    st.markdown("Set your own rules. This checks the stock against them; it doesn't decide for you. They start from common values, apply to every stock you look at, and reset when the page reloads.")
+    for k, sk in fl.KEYS.items():
+        st.session_state.setdefault(sk, fl.DEFAULTS[k])
+    f1, f2 = st.columns(2)
+    with f1:
+        st.slider("How long can you leave this money alone? (years)", 1, 15, key=fl.KEYS["years"])
+        st.selectbox("Biggest yearly price swing you can accept", list(fl.SWINGS), key=fl.KEYS["swings"])
+        st.slider("Worst fall you could sit through (%)", 10, 80, key=fl.KEYS["fall"])
+        st.radio("Dividend", fl.DIVIDENDS, key=fl.KEYS["dividend"])
+    with f2:
+        st.select_slider("Highest P/E you'd pay", options=fl.PE_CAPS, key=fl.KEYS["pe"])
+        st.checkbox("Only companies that make a profit", key=fl.KEYS["profit"])
+        st.selectbox("Smallest company size", fl.SIZES, key=fl.KEYS["size"])
+        st.selectbox("Sales growth wanted", list(fl.GROWTHS), key=fl.KEYS["growth"])
+        if held_ctx is not None:
+            st.slider("Most you'd want in one stock (% of invested)", 1, 40, key=fl.KEYS["max_share"])
+    st.markdown("##### How this stock matches")
+    for b in dtx.fit_summary(symbol, fit_rows, fit_sum):
+        st.markdown(f"- {ui.esc(b)}")
+    if fit_rows:
+        st.dataframe(pd.DataFrame([{"Your rule": r["rule"], "What you set": r["yours"], "This stock": r["stock"], "Result": FIT_ICON[r["result"]]} for r in fit_rows]),
+                     hide_index=True, width="stretch")
+    if held_ctx is None:
+        st.caption("Unlock your account in the sidebar to add a rule about how much of your invested money one stock can take.")
 
 with t_price:
     if stats is None:
@@ -375,6 +431,8 @@ with t_rules:
     st.dataframe(pd.DataFrame(dlib.rules_table(), columns=["Group", "Measure", "Good when", "Watch when"]), hide_index=True, width="stretch")
     st.markdown("**Extra signals used in the pros and cons**")
     st.dataframe(pd.DataFrame(dlib.EXTRA_RULES, columns=["Signal", "Rule"]), hide_index=True, width="stretch")
+    st.markdown("**The scorecard**")
+    st.dataframe(pd.DataFrame(sl.RULES, columns=["Step", "Rule"]), hide_index=True, width="stretch")
     st.markdown("**The Stock of the day screen (shared with the dashboard)**")
     st.dataframe(pd.DataFrame(il.RULES, columns=["Measure", "What it looks at", "Rule"]), hide_index=True, width="stretch")
     for b in dtx.worth_knowing():

@@ -6,7 +6,9 @@ Returns [(section title, [bullets])]. Bullets may contain **bold** and "$" (the 
 from __future__ import annotations
 
 import deep_lib as dlib
+import fit_lib as fl
 import hold_lib as hl
+import score_lib as sl
 
 
 def pc(x: float | None, digits: int = 1, signed: bool = False) -> str:
@@ -185,6 +187,46 @@ def holding_summary(symbol: str, h: dict | None, windows: list[dict] | None, rec
     elif not fund and div is not None and not div.get("active"):
         out.append("**While you wait:** it pays no regular dividend, so the whole return depends on the price.")
     out.append("**Long is not forever:** a long hold only works while the business stays healthy. The list below says what to re-check.")
+    return out
+
+
+def score_summary(symbol: str, sc: dict | None, fund: bool = False) -> list[str]:
+    """Plain-words bullets for the scorecard."""
+    if fund:
+        return ["Funds and ETFs aren't scored: the scorecard grades company numbers, and a fund is a basket of companies. See the price tab for how it has moved."]
+    if not sc:
+        return ["Not enough company data to score this one fairly (it needs at least three of the five areas). The Key numbers tab shows what is available."]
+    out = [f"**Scorecard: {sc['score']} out of 100 ({sc['label']}).** An average of {len(sc['areas'])} areas built from {sc['n_measures']} measures."]
+    top = max(sc["areas"], key=lambda a: a["score"])
+    low = min(sc["areas"], key=lambda a: a["score"])
+    if top is not low and top["score"] != low["score"]:
+        out.append(f"**Strongest area: {top['name']}** ({top['score']:.0f}). **Weakest: {low['name']}** ({low['score']:.0f}).")
+    else:
+        out.append("All areas scored about the same.")
+    worst = [f"{lab} ({a['name']})" for a in sc["areas"] for lab in a["worst"]]
+    if worst:
+        out.append("Marked Watch: " + ", ".join(worst[:5]) + (f" and {len(worst) - 5} more" if len(worst) > 5 else "") + ".")
+    if sc["missing"]:
+        out.append("Not scored (no data): " + ", ".join(sc["missing"]) + ". The score is an average of what was available.")
+    out.append("It ranks these numbers against rules of thumb. It is not a forecast and not a recommendation.")
+    return out
+
+
+def fit_summary(symbol: str, rows: list[dict], summ: dict) -> list[str]:
+    """Plain-words bullets for the fit check, using YOUR rules."""
+    if not rows:
+        return ["Turn on at least one rule in the Fit for you tab."]
+    if summ["checked"] == 0:
+        return ["None of your rules could be checked with the data available for this ticker."]
+    out = [f"**{summ['verdict']}:** {symbol} meets {summ['pass']} of the {summ['checked']} rules that could be checked"
+           + (f" ({summ['unknown']} couldn't be checked)." if summ["unknown"] else ".")]
+    fails = [r for r in rows if r["result"] == "fail"]
+    if fails:
+        out.append("**Doesn't meet:** " + "; ".join(f"{r['rule'].lower()} (yours: {r['yours']}, this stock: {r['stock']})" for r in fails) + ".")
+    unk = [r for r in rows if r["result"] == "unknown"]
+    if unk:
+        out.append("**Couldn't check:** " + ", ".join(r["rule"].lower() for r in unk) + ".")
+    out.append("These are your own rules, so this describes the match. It is not a recommendation, and a stock can miss a rule and still be right for someone else.")
     return out
 
 
