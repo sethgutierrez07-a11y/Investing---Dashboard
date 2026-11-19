@@ -317,3 +317,134 @@ def test_fetch_all_records_shape_without_values_and_tolerates_wrapped_accounts()
     assert len(out) == 1
     assert "units" in str(out[0]["shape"]["positions"])
     assert "Z12345678" not in str(out[0]["shape"])
+
+
+# ---- ticker/class detection (the "100% in one holding" bug) ----
+def real_pos(ticker, units, price, type_code="cs", type_desc="Common Stock", currency_symbol="$", cash_eq=False):
+    """Roughly SnapTrade's real nesting, including a currency block that ALSO has a 'symbol' string."""
+    return {
+        "symbol": {
+            "id": "pos-sym-id",
+            "symbol": {
+                "id": "u-id", "symbol": ticker, "raw_symbol": ticker, "description": f"{ticker} Inc",
+                "currency": {"id": "c", "code": "USD", "name": "US Dollar", "symbol": currency_symbol},
+                "exchange": {"code": "NYSE", "name": "NYSE", "symbol": "XNYS"},
+                "type": {"id": "t", "code": type_code, "description": type_desc},
+            },
+        },
+        "units": units, "price": price, "average_purchase_price": price * 0.8,
+        "cash_equivalent": cash_eq, "currency": {"code": "USD", "symbol": "$"},
+    }
+
+
+def test_real_shape_ticker_not_confused_by_currency_or_exchange_symbols():
+    rows = hl.normalize_positions(ACCT, [real_pos("AAPL", 1, 10.0), real_pos("VOO", 1, 10.0)])
+    assert [r["Symbol"] for r in rows] == ["AAPL", "VOO"]  # not '$' or 'XNYS'
+    assert rows[0]["Description"] == "AAPL Inc"
+
+
+def test_different_tickers_are_not_merged_into_one():
+    pf = hl.build_portfolio([item([real_pos("AAA", 1, 100.0), real_pos("BBB", 1, 100.0)])])
+    merged = hl.by_symbol(pf["positions"])
+    assert set(merged["Symbol"]) == {"AAA", "BBB"}
+    assert hl.concentration(merged["Weight %"])["largest"] == pytest.approx(50)
+
+
+def test_classify():
+    assert hl.classify(real_pos("A", 1, 1, "cs", "Common Stock")) == "Stock"
+    assert hl.classify(real_pos("V", 1, 1, "et", "ETF")) == "ETF"
+    assert hl.classify(real_pos("M", 1, 1, "xx", "Money Market Fund")) == "Fund"
+    assert hl.classify(real_pos("Z", 1, 1, "xx", "Something odd")) == "Other"
+    assert hl.classify(real_pos("S", 1, 1, "et", "ETF", cash_eq=True)) == "Cash equiv."
+    assert hl.classify({"units": 1}) == "Other"
+    assert hl.classify({"symbol": {"symbol": {"type": {"description": "Exchange Traded Fund"}}}}) == "ETF"
+
+
+# ---- summary / mix / bars / insights ----
+def sample_pf():
+    return hl.build_portfolio([item([
+        real_pos("VOO", 10, 100.0, "et", "ETF"), real_pos("AAPL", 5, 100.0, "cs", "Common Stock"),
+        real_pos("MSFT", 5, 100.0, "cs", "Common Stock"),
+    ], cash=500.0)])  # 1000 + 500 + 500 + 500 cash = 2500
+
+
+def test_summarize_numbers():
+    pf = sample_pf()
+    s = hl.summarize(pf["positions"], pf["cash"])
+    assert s["total"] == 2500 and s["invested"] == 2000 and s["n_holdings"] == 3
+    assert s["cash_pct"] == pytest.approx(20)
+    assert s["gain"] == pytest.approx(400)            # 2000 value vs 1600 cost (bought at 80% of price)
+    assert s["gain_pct"] == pytest.approx(25.0)
+    assert s["gain_coverage"] == pytest.approx(1.0)
+
+
+def test_summarize_empty_and_missing_cost():
+    s = hl.summarize(pd.DataFrame(columns=hl.POSITION_COLS), 0.0)
+    assert s["total"] == 0 and s["gain"] is None and s["cash_pct"] is None
+    pf = hl.build_portfolio([item([pos("A", 1, 100.0)])])  # no cost info
+    s = hl.summarize(pf["positions"], pf["cash"])
+    assert s["gain"] is None and s["gain_pct"] is None and s["gain_coverage"] == 0.0
+
+
+def test_asset_mix_includes_cash_and_sums_to_100():
+    pf = sample_pf()
+    mix = hl.asset_mix(pf["positions"], pf["cash"])
+    assert mix["Share %"].sum() == pytest.approx(100)
+    by = dict(zip(mix["Class"], mix["Share %"]))
+    assert by["ETF"] == pytest.approx(40) and by["Stock"] == pytest.approx(40) and by["Cash"] == pytest.approx(20)
+    assert hl.asset_mix(pd.DataFrame(columns=hl.POSITION_COLS), 0).empty
+
+
+def test_top_for_bars_folds_tail():
+    rows = [real_pos(f"T{i}", 1, 100.0 - i) for i in range(14)]
+    merged = hl.by_symbol(hl.build_portfolio([item(rows)])["positions"])
+    top = hl.top_for_bars(merged, n=10)
+    assert len(top) == 11 and top.iloc[-1]["Symbol"] == "Other (4)"
+    assert top["Weight %"].sum() == pytest.approx(100)
+    assert len(hl.top_for_bars(merged.head(3), n=10)) == 3
+
+
+def test_gain_rows_sorted_and_limited():
+    rows = [real_pos(f"T{i}", 1, 100.0) for i in range(5)]
+    for i, r in enumerate(rows):
+        r["average_purchase_price"] = 100.0 / (1 + (i - 2) * 0.1)  # varied gains incl. losses
+    merged = hl.by_symbol(hl.build_portfolio([item(rows)])["positions"])
+    g = hl.gain_rows(merged, limit=3)
+    assert len(g) == 3 and list(g["Gain %"]) == sorted(g["Gain %"], reverse=True)
+
+
+def test_formatters():
+    assert hl.money(10366.4) == "$10,366" and hl.money(-5.6) == "−$6" and hl.money(None) == "—"
+    assert hl.money(1234, signed=True) == "+$1,234" and hl.money(-1234, signed=True) == "−$1,234"
+    assert hl.pct(3.14159) == "+3.1%" and hl.pct(-2.0) == "-2.0%" and hl.pct(None) == "—"
+    assert hl.pct(12.34, signed=False) == "12.3%"
+
+
+def test_insights_are_descriptive_and_handle_single_holding():
+    pf = sample_pf()
+    merged = hl.by_symbol(pf["positions"])
+    s = hl.summarize(pf["positions"], pf["cash"])
+    mix = hl.asset_mix(pf["positions"], pf["cash"])
+    text = " ".join(hl.insights(s, hl.concentration(merged["Weight %"]), mix, merged))
+    assert "VOO" in text and "ETFs are 40%" in text and "Cash is 20%" in text
+    for banned in ("should", "buy", "sell", "recommend"):
+        assert banned not in text.lower().replace("buying", "")
+    one = hl.by_symbol(hl.build_portfolio([item([real_pos("VOO", 1, 100.0)])])["positions"])
+    s1 = hl.summarize(one.assign(**{"Market value": one["Market value"]}), 0.0)
+    assert any("single position" in t for t in hl.insights(s1, hl.concentration(one["Weight %"]), pd.DataFrame(), one))
+    assert hl.insights(s, {}, mix, pd.DataFrame()) == []
+
+
+def test_asset_mix_folds_cash_equivalents_into_cash():
+    pf = hl.build_portfolio([item([real_pos("SPAXX", 100, 1.0, "et", "ETF", cash_eq=True),
+                                   real_pos("VOO", 1, 100.0, "et", "ETF")], cash=100.0)])
+    mix = hl.asset_mix(pf["positions"], pf["cash"])
+    by = dict(zip(mix["Class"], mix["Value"]))
+    assert by["Cash"] == pytest.approx(200) and by["ETF"] == pytest.approx(100)
+    assert "Cash equiv." not in by
+
+
+def test_summarize_excludes_cash_equivalents_from_holding_count():
+    pf = hl.build_portfolio([item([real_pos("VOO", 1, 100.0, "et", "ETF"),
+                                   real_pos("SPAXX", 100, 1.0, "oef", "Money Market", cash_eq=True)])])
+    assert hl.summarize(pf["positions"], pf["cash"])["n_holdings"] == 1
