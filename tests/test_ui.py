@@ -168,7 +168,7 @@ def test_fonts_and_streamlit_version_support_the_theme():
 
 # ---------------------------------------------------------------- every page uses it
 @pytest.mark.parametrize("page", ["dashboard.py", "pages/1_Daily_Brief.py", "pages/2_Holdings.py", "pages/3_Strategy_Lab.py",
-                                  "pages/4_Dividends.py", "pages/5_Risk.py"])
+                                  "pages/4_Dividends.py", "pages/5_Risk.py", "pages/6_Market.py", "pages/7_Learn.py"])
 def test_every_page_applies_the_style_right_after_page_config(page):
     src = (ROOT / page).read_text()
     assert re.search(r"^st\.set_page_config\(.*\)\nui\.apply\(\)\n", src, re.M), page
@@ -186,7 +186,8 @@ def test_home_shows_status_strip_and_shortcuts_locked(monkeypatch):
     html = " ".join(str(c.args[0]) for c in st.markdown.call_args_list if c.args)
     assert "ix-strip" in html and "Market data live · 3/3 quotes" in html and "Account locked" in html
     assert "Personal research terminal" in html and "<style>" in html
-    assert [c.args[0] for c in st.page_link.call_args_list] == [p for p, *_ in ui.NAV]
+    links = [c.args[0] for c in st.page_link.call_args_list]
+    assert links[:len(ui.NAV)] == [p for p, *_ in ui.NAV]              # the tip card adds one more link after the tiles
     assert snap == []                                                  # styling never touches the brokerage
 
 

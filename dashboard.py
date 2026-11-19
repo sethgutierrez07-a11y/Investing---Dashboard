@@ -20,6 +20,7 @@ import datetime as dt
 
 import holdings_lib as hl
 import idea_lib as il
+import learn_lib as ll
 import portfolio_state as ps
 
 st.set_page_config(page_title="Investing Dashboard", layout="wide")
@@ -306,6 +307,7 @@ def main():
 
     status_box = st.container()  # filled once the quotes below have loaded
     ui.nav_tiles()
+    ui.tip_card(ll.tip_of_the_day(ui.today_central()))
     st.write("")
 
     api_key = get_api_key()
