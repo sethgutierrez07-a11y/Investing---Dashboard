@@ -141,6 +141,35 @@ def metrics(ret: pd.Series, positions: pd.Series | None = None) -> dict | None:
     return out
 
 
+def stock_profile(ret: pd.Series | None) -> dict | None:
+    """How the stock itself behaved over a window of daily returns: calendar-year record and
+    how long it spent below an earlier high. Only years with ~a full year of data count."""
+    if ret is None or len(ret) < 120:
+        return None
+    eq = (1 + ret).cumprod()
+    dd = eq / eq.cummax() - 1
+    yearly = {}
+    for y, r in ret.groupby(ret.index.year):
+        if len(r) >= 200:
+            yearly[int(y)] = float((1 + r).prod() - 1)
+    below = dd < 0
+    longest, longest_open = 0.0, False
+    if below.any():
+        grp = (~below).cumsum()
+        days = pd.Series(ret.index, index=ret.index)[below]
+        for _, d in days.groupby(grp[below]):
+            span = (d.iloc[-1] - d.iloc[0]).days / 365.25
+            if span >= longest:
+                longest, longest_open = span, bool(d.iloc[-1] == ret.index[-1])
+    out = {"years_total": len(yearly), "years_up": sum(1 for v in yearly.values() if v > 0),
+           "best_year": None, "worst_year": None, "longest_underwater_years": float(longest),
+           "still_underwater": bool(longest_open), "from_peak": float(dd.iloc[-1])}
+    if yearly:
+        out["best_year"] = max(yearly.items(), key=lambda kv: kv[1])
+        out["worst_year"] = min(yearly.items(), key=lambda kv: kv[1])
+    return out
+
+
 def drawdown(ret: pd.Series) -> pd.Series:
     eq = (1 + ret).cumprod()
     return eq / eq.cummax() - 1
