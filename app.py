@@ -166,7 +166,7 @@ def main():
             {"Price": "${:.2f}", "Change": "{:+.2f}", "Change %": "{:+.2f}%", "Prev Close": "${:.2f}"},
             na_rep="—",
         ),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
 
@@ -185,7 +185,7 @@ def main():
 
             if trend_data:
                 latest = trend_data[0]
-                col1.plotly_chart(render_consensus_bar(latest), use_container_width=True)
+                col1.plotly_chart(render_consensus_bar(latest), width="stretch")
                 col1.caption(f"As of period ending {latest.get('period', 'unknown')}.")
             else:
                 col1.info("No analyst recommendation data available for this ticker.")
