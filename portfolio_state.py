@@ -12,6 +12,7 @@ Nothing here shows account data unless the visitor has entered APP_PASSWORD
 
 import time
 
+import pandas as pd
 import streamlit as st
 
 import holdings_lib as hl
@@ -135,4 +136,4 @@ def gain_lookup(portfolio) -> dict[str, float | None]:
     if not portfolio:
         return {}
     m = portfolio["merged"]
-    return {s: (None if g != g else float(g)) for s, g in zip(m["Symbol"], m["Gain %"])}
+    return {s: (None if pd.isna(g) else float(g)) for s, g in zip(m["Symbol"], m["Gain %"])}
