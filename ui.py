@@ -18,31 +18,40 @@ import datetime as dt
 from html import escape
 
 # Mode-specific colors for the CSS layer. Chart colors stay in holdings_charts (validated palette).
+# Light = beige ground with black ink; dark = black ground with beige ink. Same two tones, swapped.
 PALETTE = {
     "dark": {
-        "accent": "#38bdf8", "accent2": "#a78bfa", "glow": "rgba(56,189,248,.38)",
-        "card": "linear-gradient(160deg, rgba(56,189,248,.060), rgba(167,139,250,.030) 60%, rgba(255,255,255,.015))",
-        "card_border": "rgba(120,150,200,.22)", "card_hover": "rgba(56,189,248,.60)", "card_shadow": "0 1px 0 rgba(255,255,255,.04) inset",
-        "hair": "rgba(148,163,184,.30)", "muted": "rgba(230,237,247,.64)", "faint": "rgba(148,163,184,.16)",
-        "page": ("radial-gradient(1100px 520px at 8% -12%, rgba(56,189,248,.13), transparent 62%),"
-                 "radial-gradient(900px 440px at 100% -8%, rgba(167,139,250,.10), transparent 58%),"
-                 "linear-gradient(rgba(148,163,184,.035) 1px, transparent 1px),"
-                 "linear-gradient(90deg, rgba(148,163,184,.035) 1px, transparent 1px)"),
-        "page_size": "auto, auto, 46px 46px, 46px 46px",
-        "ok": "#2bb673", "warn": "#e8a317", "off": "#8b98ad", "info": "#38bdf8",
+        "accent": "#ede6d6", "accent2": "#bdb29b", "glow": "rgba(237,230,214,.16)",
+        "card": "#1c1915", "card_border": "#3a352d", "card_hover": "#ede6d6", "card_shadow": "none",
+        "hair": "rgba(237,230,214,.26)", "muted": "rgba(237,230,214,.66)", "faint": "rgba(237,230,214,.07)",
+        "page": "none", "page_size": "auto",
+        "ok": "#8fb07a", "warn": "#d9a441", "off": "#8f8570", "info": "#ede6d6",
     },
     "light": {
-        "accent": "#0369a1", "accent2": "#6d4fd6", "glow": "rgba(3,105,161,.22)",
-        "card": "linear-gradient(180deg, #ffffff, rgba(255,255,255,.82))",
-        "card_border": "rgba(15,23,42,.11)", "card_hover": "rgba(3,105,161,.55)",
-        "card_shadow": "0 1px 2px rgba(15,23,42,.05), 0 10px 26px -14px rgba(15,23,42,.14)",
-        "hair": "rgba(15,23,42,.18)", "muted": "rgba(15,23,42,.62)", "faint": "rgba(15,23,42,.08)",
-        "page": ("radial-gradient(1000px 460px at 6% -14%, rgba(3,105,161,.08), transparent 62%),"
-                 "radial-gradient(800px 400px at 100% -10%, rgba(109,79,214,.06), transparent 58%)"),
-        "page_size": "auto, auto",
-        "ok": "#0b8a55", "warn": "#b7791f", "off": "#64748b", "info": "#0369a1",
+        "accent": "#14120f", "accent2": "#6b6358", "glow": "rgba(20,18,15,.14)",
+        "card": "#f7f2e7", "card_border": "#cfc5b0", "card_hover": "#14120f", "card_shadow": "none",
+        "hair": "rgba(20,18,15,.30)", "muted": "rgba(20,18,15,.66)", "faint": "rgba(20,18,15,.06)",
+        "page": "none", "page_size": "auto",
+        "ok": "#4f6b3a", "warn": "#8a6a1f", "off": "#6b6358", "info": "#14120f",
     },
 }
+
+# Two switchable looks over the same beige-and-black theme. The theme file sets the colors; a look sets
+# the type and the shape of things (serif and airy, or mono figures and square panels).
+LOOKS = {"editorial": "Editorial", "research": "Research"}
+DEFAULT_LOOK = "editorial"
+
+
+def look() -> str:
+    """The look the viewer picked this session (the ?look= address, if they reloaded), else the default."""
+    try:
+        import streamlit as st
+        for v in (st.session_state.get("look"), st.query_params.get("look")):
+            if isinstance(v, str) and v in LOOKS:
+                return v
+    except Exception:
+        pass
+    return DEFAULT_LOOK
 
 
 def mode() -> str:
@@ -54,8 +63,43 @@ def mode() -> str:
         return "dark"
 
 
-def css(m: str = "dark") -> str:
-    """The stylesheet for one mode. No blank lines on purpose: Markdown ends an HTML block at a blank line."""
+def look_css(name: str, p: dict) -> str:
+    """Extra rules for one look. Unknown names get the default look."""
+    if name == "research":
+        return f"""
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Newsreader:wght@400;500;600&display=swap');
+[data-testid="stMainBlockContainer"] :is(h1, h2, h3) {{ font-family: 'Newsreader', Georgia, serif; font-weight: 500; letter-spacing: -0.01em; }}
+[data-testid="stMainBlockContainer"] h1 {{ font-size: 2.3rem; line-height: 1.1; }}
+[data-testid="stMainBlockContainer"] h1::after {{ width: 100%; height: 2px; margin-top: .7rem; border-radius: 0; background: {p['accent']}; box-shadow: none; }}
+[data-testid="stMainBlockContainer"] {{ padding-top: 1.8rem; }}
+[data-testid="stMetricValue"] {{ font-family: 'IBM Plex Mono', ui-monospace, monospace; font-weight: 500; font-size: 1.7rem; letter-spacing: -0.02em; }}
+[data-testid="stMetricLabel"] p {{ font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: .66rem; letter-spacing: .12em; }}
+[data-testid="stMetricDelta"] {{ font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: .8rem; }}
+[data-testid="stVerticalBlockBorderWrapper"]:is(:has([data-testid="stMetric"]), :has(.ix-tile-note)):not(:has([data-testid="stVerticalBlockBorderWrapper"])) {{ border-radius: 3px; border: 1px solid {p['card_border']}; }}
+button[data-baseweb="tab"] {{ font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: .74rem; text-transform: uppercase; letter-spacing: .08em; }}
+[data-baseweb="tab-highlight"] {{ height: 2px; border-radius: 0; box-shadow: none; }}
+.ix-eyebrow, .ix-label {{ font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: .66rem; letter-spacing: .16em; }}
+.ix-chip {{ border-radius: 3px; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: .72rem; }}
+[data-testid="stSidebar"] {{ border-right: 1px solid {p['card_border']}; }}
+[data-testid="stHeader"] {{ border-bottom: 1px solid {p['card_border']}; }}
+"""
+    return f"""
+@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&display=swap');
+[data-testid="stMainBlockContainer"] :is(h1, h2, h3) {{ font-family: 'Instrument Serif', Georgia, serif; font-weight: 400; letter-spacing: -0.02em; }}
+[data-testid="stMainBlockContainer"] h1 {{ font-size: 3.4rem; line-height: 1.02; }}
+[data-testid="stMainBlockContainer"] h2 {{ font-size: 2.1rem; }}
+[data-testid="stMainBlockContainer"] h3 {{ font-size: 1.6rem; }}
+[data-testid="stMainBlockContainer"] h1::after {{ width: 100%; height: 1px; margin-top: 1rem; border-radius: 0; background: {p['hair']}; box-shadow: none; }}
+[data-testid="stMainBlockContainer"] {{ padding-top: 3rem; }}
+[data-testid="stMetricValue"] {{ font-family: 'Instrument Serif', Georgia, serif; font-weight: 400; font-size: 2.6rem; letter-spacing: -0.02em; }}
+[data-testid="stVerticalBlockBorderWrapper"]:is(:has([data-testid="stMetric"]), :has(.ix-tile-note)):not(:has([data-testid="stVerticalBlockBorderWrapper"])) {{ border-radius: 4px; padding: .4rem .3rem; }}
+[data-baseweb="tab-highlight"] {{ height: 2px; border-radius: 0; box-shadow: none; }}
+.ix-chip {{ border-radius: 999px; }}
+"""
+
+
+def css(m: str = "dark", skin: str = "editorial") -> str:
+    """The stylesheet for one mode and look. No blank lines on purpose: Markdown ends an HTML block at a blank line."""
     p = PALETTE["light" if m == "light" else "dark"]
     rules = f"""
 @keyframes ix-pulse {{ 0% {{ box-shadow: 0 0 0 0 {p['glow']}; }} 70% {{ box-shadow: 0 0 0 7px rgba(0,0,0,0); }} 100% {{ box-shadow: 0 0 0 0 rgba(0,0,0,0); }} }}
@@ -74,12 +118,12 @@ h1, h2, h3 {{ letter-spacing: -0.02em; }}
 [data-testid="stMetricValue"] {{ font-family: 'Space Grotesk', Inter, system-ui, sans-serif; font-weight: 600; font-size: 2rem; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }}
 [data-testid="stMetricDelta"] {{ font-variant-numeric: tabular-nums; font-weight: 600; }}
 [data-testid="stVerticalBlockBorderWrapper"]:is(:has([data-testid="stMetric"]), :has(.ix-tile-note)):not(:has([data-testid="stVerticalBlockBorderWrapper"])) {{ background: {p['card']}; border-color: {p['card_border']}; box-shadow: {p['card_shadow']}; transition: border-color .2s ease, box-shadow .2s ease; }}
-[data-testid="stVerticalBlockBorderWrapper"]:is(:has([data-testid="stMetric"]), :has(.ix-tile-note)):not(:has([data-testid="stVerticalBlockBorderWrapper"])):hover {{ border-color: {p['card_hover']}; box-shadow: 0 0 0 1px {p['card_hover']}, 0 8px 28px -12px {p['glow']}; }}
+[data-testid="stVerticalBlockBorderWrapper"]:is(:has([data-testid="stMetric"]), :has(.ix-tile-note)):not(:has([data-testid="stVerticalBlockBorderWrapper"])):hover {{ border-color: {p['card_hover']}; box-shadow: 0 0 0 1px {p['card_hover']}; }}
 button[data-baseweb="tab"] {{ font-weight: 600; letter-spacing: .01em; }}
 [data-baseweb="tab-list"] {{ gap: .15rem; }}
 [data-baseweb="tab-highlight"] {{ height: 3px; border-radius: 3px; box-shadow: 0 0 12px {p['glow']}; }}
 [data-testid^="stBaseButton"] {{ transition: box-shadow .2s ease, border-color .2s ease; font-weight: 600; }}
-[data-testid^="stBaseButton"]:hover {{ box-shadow: 0 0 0 1px {p['card_hover']}, 0 6px 22px -10px {p['glow']}; }}
+[data-testid^="stBaseButton"]:hover {{ box-shadow: 0 0 0 1px {p['card_hover']}; }}
 [data-testid="stMainBlockContainer"] hr {{ border: none; height: 1px; background: linear-gradient(90deg, transparent, {p['hair']}, transparent); margin: 1.6rem 0; }}
 [data-testid="stExpander"] summary {{ font-weight: 600; }}
 [data-testid="stSidebar"] {{ background-image: linear-gradient(180deg, {p['faint']}, transparent 38%); }}
@@ -93,19 +137,44 @@ button[data-baseweb="tab"] {{ font-weight: 600; letter-spacing: .01em; }}
 .ix-strip {{ display: flex; flex-wrap: wrap; gap: .5rem; margin: .2rem 0 1rem 0; }}
 .ix-chip {{ display: inline-flex; align-items: center; gap: .45rem; padding: .28rem .7rem; border-radius: 999px; font-size: .78rem; font-weight: 600; letter-spacing: .01em; border: 1px solid {p['card_border']}; background: {p['faint']}; white-space: nowrap; }}
 .ix-chip i {{ width: 7px; height: 7px; border-radius: 50%; display: inline-block; }}
-.ix-ok i {{ background: {p['ok']}; box-shadow: 0 0 8px {p['ok']}; }}
-.ix-warn i {{ background: {p['warn']}; box-shadow: 0 0 8px {p['warn']}; }}
+.ix-ok i {{ background: {p['ok']}; }}
+.ix-warn i {{ background: {p['warn']}; }}
 .ix-off i {{ background: {p['off']}; }}
-.ix-info i {{ background: {p['info']}; box-shadow: 0 0 8px {p['info']}; }}
+.ix-info i {{ background: {p['info']}; }}
 .ix-tile-note {{ color: {p['muted']}; font-size: .8rem; line-height: 1.45; margin: .15rem 0 0 0; }}
 """
-    return "\n".join(line for line in rules.splitlines() if line.strip())
+    rules += look_css(skin if skin in LOOKS else DEFAULT_LOOK, p)
+    # a CSS @import is only honoured before every other rule, so lift the look's @import lines to the top
+    lines = [ln for ln in rules.splitlines() if ln.strip()]
+    imports = [ln for ln in lines if ln.startswith("@import")]
+    return "\n".join(imports + [ln for ln in lines if not ln.startswith("@import")])
+
+
+def look_switch() -> str:
+    """Show the Editorial / Research switch at the top of the sidebar and return the chosen look.
+    The choice lives in this browser session; the address also carries it, so a reload keeps it."""
+    import streamlit as st
+    current = look()
+    picked = None
+    try:
+        picked = st.sidebar.segmented_control("Look", list(LOOKS), format_func=LOOKS.get, default=current, key="look",
+                                              selection_mode="single", width="stretch")
+    except Exception:
+        pass
+    choice = picked if isinstance(picked, str) and picked in LOOKS else current
+    try:
+        if st.query_params.get("look") != choice:
+            st.query_params["look"] = choice
+    except Exception:
+        pass
+    return choice
 
 
 def apply() -> None:
     """Inject the shared stylesheet. Call once per page, right after st.set_page_config."""
     import streamlit as st
-    st.markdown(f"<style>\n{css(mode())}\n</style>", unsafe_allow_html=True)
+    choice = look_switch()
+    st.markdown(f"<style>\n{css(mode(), choice)}\n</style>", unsafe_allow_html=True)
 
 
 # ---------------------------------------------------------------- small HTML pieces (home page)
