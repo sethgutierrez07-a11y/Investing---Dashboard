@@ -197,3 +197,34 @@ def test_overfit_note_mentions_shallower_drawdown_and_short_window():
     _, t = lab.overfit_note(m(.12), m(.08), m(.06, -0.10), m(.07, -0.30))
     assert "shallower" in t
     assert lab.overfit_note(m(.1), m(.1), None, m(.1))[0] == "neutral"
+
+
+# ---- stock_profile: how the stock itself behaved
+def test_stock_profile_year_record_and_recovery_time():
+    idx = pd.bdate_range("2015-01-01", "2019-12-31")
+    yearly = {2015: 0.10, 2016: -0.20, 2017: 0.30, 2018: 0.05, 2019: 0.15}
+    rets = []
+    for y in idx.year.unique():
+        n = int((idx.year == y).sum())
+        rets += [(1 + yearly[y]) ** (1 / n) - 1] * n
+    prof = lab.stock_profile(pd.Series(rets, index=idx))
+    assert prof["years_total"] == 5 and prof["years_up"] == 4
+    assert prof["best_year"][0] == 2017 and prof["best_year"][1] == pytest.approx(0.30, abs=1e-6)
+    assert prof["worst_year"][0] == 2016 and prof["worst_year"][1] == pytest.approx(-0.20, abs=1e-6)
+    # fell through 2016, rebuilt through 2017: below the end-2015 high from Jan 2016 until mid 2017
+    assert 1.0 < prof["longest_underwater_years"] < 2.0 and prof["still_underwater"] is False
+    assert prof["from_peak"] == pytest.approx(0.0, abs=1e-9)
+
+
+def test_stock_profile_flags_an_unrecovered_slide_and_short_windows():
+    idx = pd.bdate_range("2018-01-01", periods=600)
+    prof = lab.stock_profile(pd.Series(-0.001, index=idx))
+    assert prof["still_underwater"] is True and prof["longest_underwater_years"] > 2.0 and prof["years_up"] == 0
+    assert prof["from_peak"] < -0.4
+    assert lab.stock_profile(pd.Series(0.001, index=idx[:50])) is None and lab.stock_profile(None) is None
+
+
+def test_stock_profile_skips_partial_calendar_years():
+    idx = pd.bdate_range("2019-09-01", "2021-03-31")                            # partial 2019 and 2021
+    prof = lab.stock_profile(pd.Series(0.0005, index=idx))
+    assert prof["years_total"] == 1 and prof["best_year"][0] == 2020

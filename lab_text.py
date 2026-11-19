@@ -3,7 +3,7 @@ Free, rule-based written summary for the Strategy Lab. No AI, no network, no Str
 
 Turns the numbers on the page into plain sentences about THIS ticker and THIS rule:
 what the rule does, what happened, the risk/return trade-off, what costs did, whether
-luck can explain it, how the held-out period compared, and what to try next.
+luck can explain it, how the held-out period compared, and a plain verdict on the rule and on the stock itself.
 """
 
 from __future__ import annotations
@@ -121,37 +121,182 @@ def held_out_section(note_text: str, ms_test: dict | None, mb_test: dict | None,
     return out
 
 
-def takeaway(symbol, key, ms, mb, p, n_trials, revealed, overfit_level, has_timing) -> list[str]:
+def usd(x: float) -> str:
+    return f"${x:,.0f}"
+
+
+def md(text: str) -> str:
+    """Streamlit renders $...$ as math, so dollar signs are escaped before going into markdown."""
+    return text.replace("$", "\\$")
+
+
+def rule_name(key: str, params: dict) -> str:
+    if key == "trend":
+        return f"The {params['window']}-day trend rule"
+    if key == "momentum":
+        return f"The {params['lookback']}-day momentum rule"
+    return "Dollar-cost averaging"
+
+
+def outcome(d_ret: float, d_dd: float) -> str:
+    """One word for how the rule did against its yardstick. d_dd > 0 means a shallower worst drop."""
+    r, d = 0.005, 0.02
+    if d_ret >= r:
+        return "win" if d_dd >= -d else "win_risky"
+    if d_ret <= -r:
+        return "safer" if d_dd > d else "lose"
+    if d_dd > d:
+        return "smoother"
+    return "bumpier" if d_dd < -d else "tie"
+
+
+def end_value(m: dict) -> float:
+    return 10_000 * (1 + m["cagr"]) ** m["years"]
+
+
+def stock_class(cagr: float, dd: float) -> tuple[str, str]:
+    """(short description, one-sentence read) of the stock itself over the period."""
+    if cagr < 0:
+        return "a stock that lost money", "It lost money over the period, so any rule was working against a falling stock."
+    if cagr < 0.03:
+        return "a weak performer", ("Returns this low are in the range savings accounts or bond funds have paid at times, "
+                                    "so holding it was not well rewarded.")
+    if dd <= -0.4:
+        word = "strong" if cagr >= 0.12 else "decent"
+        return f"a {word} but volatile stock", f"The returns were real, but only for holders who could sit through a {pct(-dd, 0)} fall."
+    if cagr >= 0.12:
+        if dd > -0.3:
+            return "a strong, fairly steady stock", "A strong stretch without a deep scare."
+        return "a strong stock with real swings", f"Strong returns, with a {pct(-dd, 0)} fall along the way that tested patience."
+    if cagr >= 0.08 and dd > -0.3:
+        return "a solid, fairly steady stock", "A solid stretch without a deep scare."
+    return "a solid, ordinary performer", "A decent stretch with the usual ups and downs."
+
+
+def stock_lines(symbol: str, mb: dict, profile: dict | None) -> list[str]:
+    years = mb["years"]
+    out = [f"**How {symbol} held up:** it grew {pct(mb['cagr'])} a year over {years:.1f} years ({usd(end_value(mb))} from {usd(10_000)}), "
+           f"with a worst drop of {pct(-mb['max_drawdown'])} and yearly swings of about {pct(mb['volatility'], 0)}."]
+    if profile:
+        bits = []
+        if profile["longest_underwater_years"] >= 0.25:
+            if profile["still_underwater"]:
+                bits.append(f"it was below an earlier high for {profile['longest_underwater_years']:.1f} years and had not recovered by the end of the period")
+            else:
+                bits.append(f"its longest wait to get back to an earlier high was {profile['longest_underwater_years']:.1f} years")
+        if profile["years_total"] >= 3:
+            bits.append(f"it was up in {profile['years_up']} of {profile['years_total']} full calendar years "
+                        f"(best {profile['best_year'][0]}: {profile['best_year'][1] * 100:+.0f}%, worst {profile['worst_year'][0]}: {profile['worst_year'][1] * 100:+.0f}%)")
+        if bits:
+            out.append("Along the way, " + "; ".join(bits) + ".")
+    return out
+
+
+def significance(out: str, p: float | None, n_trials: int, has_timing: bool, ms: dict, revealed: bool,
+                 overfit_level: str | None) -> tuple[str, str]:
+    """(full sentence(s), short clause for the 'in short' line)."""
+    if not has_timing:
+        return ("Nothing to test for luck here: this compares two ways of getting the same money in, so the gap is simply the "
+                "price or the benefit of waiting.", "")
+    if out in ("lose", "bumpier", "tie"):
+        return ("The luck test is beside the point: a rule that did not help does not need explaining away.", "")
+    from lab_lib import adjusted_threshold  # pure function; imported here to keep this module light
+
+    if p is None:
+        strength, text = "none", "There was not enough timing in this window to run the luck test."
+    else:
+        thr = adjusted_threshold(n_trials)
+        if p <= thr and p <= 0.05:
+            strength = "strong"
+            text = f"The edge is unlikely to be luck: only {p * 100:.1f}% of random placements did as well" + (f", even after counting your {n_trials} tries" if n_trials > 1 else "") + "."
+        elif p <= 0.2:
+            strength = "suggestive"
+            text = f"It is suggestive but not proven: {p * 100:.0f}% of random placements did as well, which luck produces often."
+        else:
+            strength = "none"
+            text = f"Luck can explain it: {p * 100:.0f}% of random placements did as well or better."
+    if out in ("safer", "smoother"):
+        lead = "The smoother ride is built in, because the rule steps aside during falls, so it is real for this history. "
+        if p is None:
+            text = lead + "There was not enough timing in this window to say whether the timing itself was skilful."
+        elif strength == "strong":
+            text = (lead + f"The timing also beat chance: only {p * 100:.1f}% of random placements with the same in-and-out pattern did as well. "
+                    "It avoided bad stretches better than luck would, but it still earned less than simply holding.")
+        elif strength == "suggestive":
+            text = lead + f"Its timing looks somewhat better than random ({p * 100:.0f}% of random placements did as well), though luck does that often."
+        else:
+            text = (lead + f"Its timing was no better than random ({p * 100:.0f}% of random placements did as well), "
+                    "so the safety comes from being out of the market at all, not from picking good moments.")
+        short = {"strong": "its timing beat chance but not holding", "suggestive": "its timing is only suggestively better than chance",
+                 "none": "the safety comes from being out of the market, not from good timing"}[strength]
+    else:
+        short = None
+    extra = []
+    if "trades" in ms and ms["trades"] < 10:
+        extra.append(f"With only {ms['trades']} trades this is a small sample.")
+    if ms["years"] < 5:
+        extra.append(f"It covers just {ms['years']:.1f} years.")
+    if revealed and overfit_level == "good":
+        extra.append("On the held-out data it held up.")
+    elif revealed and overfit_level == "warn":
+        extra.append("On the held-out data the edge faded or vanished, which weakens the case.")
+    elif not revealed:
+        extra.append("The held-out period is still sealed, so this is training-period evidence only.")
+    if short is None:
+        short = {"strong": "the edge looks real rather than luck", "suggestive": "the evidence is suggestive, not proven",
+                 "none": "luck can explain it"}[strength]
+    return " ".join([text] + extra), short
+
+
+HEADLINES = {
+    "win": "{rn} beat {bench} on {symbol}.",
+    "win_risky": "{rn} earned more than {bench} on {symbol}, but with deeper drops.",
+    "safer": "{rn} traded return for a smoother ride on {symbol}.",
+    "lose": "{rn} did not beat {bench} on {symbol}.",
+    "smoother": "{rn} matched {bench} on {symbol} with a smoother ride.",
+    "bumpier": "{rn} matched {bench} on return on {symbol} but with bigger drops.",
+    "tie": "{rn} and {bench} came out about the same on {symbol}.",
+}
+
+
+def takeaway(symbol, key, params, benchmark_name, ms, mb, p, n_trials, revealed, overfit_level, has_timing, profile=None) -> list[str]:
     d_ret = ms["cagr"] - mb["cagr"]
     d_dd = ms["max_drawdown"] - mb["max_drawdown"]
-    out = []
-    if d_ret <= 0.002 and d_dd <= 0.02:
-        out.append(f"**Bottom line:** on {symbol} over this period, the rule did not earn its complexity. Holding was at least as good, and that is a legitimate and common result.")
-    elif d_ret <= 0.002 and d_dd > 0.02:
-        out.append("**Bottom line:** the rule is a risk-management tool here rather than a return booster. Judge it on whether the smoother ride is worth the lower return.")
-    else:
-        weak_luck = has_timing and (p is None or p > 0.05)
-        if weak_luck:
-            out.append("**Bottom line:** it earned more, but the luck test cannot separate that from chance. Treat it as an interesting lead, not a finding.")
-        else:
-            out.append("**Bottom line:** it earned more and the timing looks better than chance on this period. The next question is whether that survives other tickers and fresh data.")
-    if revealed and overfit_level == "warn":
-        out.append("The held-out period weakened the case. That is the test doing its job.")
-    steps = [
-        "Run the same rule on two or three other tickers. A real effect usually shows up beyond one.",
-        "Nudge the setting up and down a bit. If the result swings wildly, it was fitted to one lucky number.",
-        "Raise the trading cost to 25 bps to see whether the edge survives realistic friction.",
-    ]
-    if not revealed and has_timing:
-        steps.append("When you are settled on the rule, reveal the held-out period once. Do not tune after peeking.")
-    out.append("**What to try next:** " + " ".join(f"({i}) {s}" for i, s in enumerate(steps, 1)))
-    out.append("Hypothetical results on historical data; past performance does not predict the future. Educational, not advice.")
-    return out
+    rn, bench = rule_name(key, params), benchmark_name.lower()
+    out_code = outcome(d_ret, d_dd)
+    headline = HEADLINES[out_code].format(rn=rn, bench=bench, symbol=symbol)
+    sig_text, sig_short = significance(out_code, p, n_trials, has_timing, ms, revealed, overfit_level)
+    descr, read = stock_class(mb["cagr"], mb["max_drawdown"])
+
+    a, b = usd(end_value(ms)), usd(end_value(mb))
+    drops = f"{pct(-ms['max_drawdown'])} against {pct(-mb['max_drawdown'])}"
+    numbers = {
+        "win": f"{usd(10_000)} became {a} with the rule against {b} for {bench} ({pct(ms['cagr'])} against {pct(mb['cagr'])} a year), and the worst drop was {drops}.",
+        "win_risky": f"{usd(10_000)} became {a} against {b}, but the worst drop was {drops}: the extra return came with extra pain.",
+        "safer": f"{usd(10_000)} became {a} with the rule against {b} for {bench}, giving up {abs(d_ret) * 100:.1f} points a year. In exchange the worst drop was {drops}.",
+        "lose": f"{usd(10_000)} became {a} with the rule against {b} for {bench}, and the worst drop was {drops}, so it was not safer either.",
+        "smoother": f"Both turned {usd(10_000)} into about {a}, but the worst drop was {drops}.",
+        "bumpier": f"Both turned {usd(10_000)} into about {a}, but the worst drop was {drops}, so the rule only added risk.",
+        "tie": f"{usd(10_000)} became {a} against {b}, with worst drops of {drops}. There is no meaningful gap to explain.",
+    }[out_code]
+
+    short = f"**In short:** {headline}" + (f" {sig_short[0].upper() + sig_short[1:]}." if sig_short else "") + f" {symbol} itself was {descr} over this period."
+    lines = [short, f"**The outcome:** {numbers}", f"**Does it matter?** {sig_text}"]
+    lines += stock_lines(symbol, mb, profile)
+    context = read
+    if out_code in ("win", "safer", "smoother") and mb["max_drawdown"] <= -0.35:
+        context += " It also had a deep fall for the rule to sidestep, which is what rules like this exist for."
+    elif out_code in ("safer", "lose") and mb["cagr"] >= 0.12:
+        context += " A stock that climbs like this is hard for any sit-out rule to beat, because every day in cash misses gains."
+    lines.append(f"**The read on {symbol}:** {context}")
+    lines.append("Hypothetical results on historical data from the training period shown; past performance does not predict the future. Educational, not advice.")
+    return lines
 
 
 def write_summary(
     *, symbol, key, label, params, cost_bps, source, start, end, split, train_pct, benchmark_name,
     ms, mb, cagr_no_cost, luck, luck_text, n_trials, has_timing, revealed, overfit=None, ms_test=None, mb_test=None,
+    profile=None,
 ) -> list[Section]:
     years = ms["years"]
     sections: list[Section] = [
@@ -164,6 +309,6 @@ def write_summary(
     ]
     if revealed and overfit:
         sections.append(("Held-out test", held_out_section(overfit[1], ms_test, mb_test, benchmark_name)))
-    sections.append(("Takeaway", takeaway(symbol, key, ms, mb, (luck or {}).get("p_value"), n_trials, revealed,
-                                          overfit[0] if overfit else None, has_timing)))
+    sections.append(("Takeaway", takeaway(symbol, key, params, benchmark_name, ms, mb, (luck or {}).get("p_value"), n_trials,
+                                          revealed, overfit[0] if overfit else None, has_timing, profile)))
     return [(t, b) for t, b in sections if b]

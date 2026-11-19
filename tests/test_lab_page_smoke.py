@@ -148,3 +148,20 @@ def test_summary_gains_held_out_tab_once_revealed_and_handles_dca(monkeypatch):
     st2 = make_st("dca")
     run(monkeypatch, st2)
     assert "money waiting to be invested" in text(st2)
+
+
+def test_takeaway_gives_a_verdict_and_stock_read_without_peeking_at_held_out_data(monkeypatch):
+    import re
+
+    st = make_st("trend")
+    p = prices()
+    p[p.index >= "2018-01-01"] *= np.linspace(1, 6, int((p.index >= "2018-01-01").sum()))     # a huge run AFTER the training window
+    run(monkeypatch, st, load=lambda sym, key: (p, "Yahoo Finance (dividend-adjusted)", []))
+    bullets = [c.args[0] for c in st.markdown.call_args_list if c.args and str(c.args[0]).startswith("- ")]
+    take = " ".join(b for b in bullets if "In short" in b or "How SPY held up" in b or "The outcome" in b or "The read on SPY" in b or "Along the way" in b)
+    assert "**In short:**" in take and "**The outcome:**" in take and "How SPY held up" in take and "The read on SPY" in take
+    assert "What to try next" not in " ".join(bullets)
+    assert all(not re.search(r"(?<!\\)\$", b) for b in bullets)            # dollar signs escaped so markdown doesn't make math
+    # fake prices run 2012 to late 2019 and the default training share ends mid 2017: no later year may be named
+    years = [int(y) for y in re.findall(r"(?:best|worst) (\d{4})", take)]
+    assert years and max(years) <= 2017 and "2018" not in take and "2019" not in take
