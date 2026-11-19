@@ -79,6 +79,8 @@ def make_streamlit(hide, combine, secrets):
     st.columns.side_effect = lambda spec, **k: [MagicMock() for _ in range(spec if isinstance(spec, int) else len(spec))]
     st.stop.side_effect = Stopped
     st.context.theme.type = "dark"
+    st.selectbox.side_effect = lambda label, options, index=0, **k: list(options)[index]
+    st.tabs.side_effect = lambda labels: [MagicMock() for _ in labels]
     return st
 
 
@@ -122,7 +124,7 @@ def run_page(monkeypatch, st, positions=POSITIONS, cash=250.0):
     stub_plotly_if_missing()
     monkeypatch.setitem(sys.modules, "streamlit", st)
     monkeypatch.setattr(hl, "make_client", lambda cid, key: FakeClient(positions, cash))
-    for m in ("holdings_charts", "brief_lib", "portfolio_state"):
+    for m in ("holdings_charts", "brief_lib", "portfolio_state", "idea_state", "balance_charts", "risk_charts"):
         sys.modules.pop(m, None)
     runpy.run_path(str(ROOT / "pages" / "2_Holdings.py"), run_name="__main__")
 
@@ -145,7 +147,7 @@ def rendered_text(st):
 def test_page_renders_end_to_end(monkeypatch, hide, combine):
     st = make_streamlit(hide, combine, GOOD_SECRETS)
     run_page(monkeypatch, st)
-    assert st.plotly_chart.call_count == 3  # allocation, mix, gains
+    assert st.plotly_chart.call_count == 5  # allocation, mix, balance: asset mix + sectors, gains
     assert st.dataframe.called
     text = rendered_text(st)
     assert "Total portfolio value" in text
@@ -161,7 +163,7 @@ def test_page_survives_no_cost_basis_and_single_holding(monkeypatch):
     st = make_streamlit(False, True, GOOD_SECRETS)
     only = [dict(rp("VOO", 10, 100.0, None, "et", "ETF"), average_purchase_price=None)]
     run_page(monkeypatch, st, positions=only, cash=0.0)
-    assert st.plotly_chart.call_count == 2  # gains chart skipped (no cost data)
+    assert st.plotly_chart.call_count == 4  # gains chart skipped (no cost data)
     assert "single position" in rendered_text(st)
 
 
@@ -196,7 +198,7 @@ def test_page_shows_error_not_traceback_when_snaptrade_fails(monkeypatch):
         raise RuntimeError("nope")
 
     monkeypatch.setattr(hl, "make_client", boom)
-    for m in ("holdings_charts", "brief_lib", "portfolio_state"):
+    for m in ("holdings_charts", "brief_lib", "portfolio_state", "idea_state", "balance_charts", "risk_charts"):
         sys.modules.pop(m, None)
     with pytest.raises(Stopped):
         runpy.run_path(str(ROOT / "pages" / "2_Holdings.py"), run_name="__main__")
