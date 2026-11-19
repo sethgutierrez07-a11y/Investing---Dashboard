@@ -14,6 +14,7 @@ import pandas as pd
 import streamlit as st
 
 import brief_lib as bl
+import brief_text as bt
 import holdings_lib as hl
 import portfolio_state as ps
 
@@ -108,6 +109,7 @@ if portfolio:
     movers["Impact (pp)"] = movers["Symbol"].map(dict(zip(contrib["Symbol"], contrib["Contribution pp"])))
 
 st.subheader("1 · Movers")
+move = {"pct": None, "coverage": 0.0}
 if portfolio:
     move = hl.day_change(portfolio["holdings_df"], {k: v for k, v in quotes.items() if v})
     if move["pct"] is not None:
@@ -253,24 +255,37 @@ else:
     except Exception as e:
         st.warning(f"Couldn't load SEC filings: {e}")
 
-# 6) Claude summary ----------------------------------------------------
+# 6) Written brief -----------------------------------------------------
 st.subheader("6 · Written brief")
+try:
+    spy = c_quote("SPY", api_key)  # the market, for comparison
+    benchmark = spy.get("dp") if spy and spy.get("c") else None
+except Exception:
+    benchmark = None
+sections = bt.write_brief(
+    quotes=quotes, weights=weights, contrib=contrib, move_pct=move["pct"], coverage=move["coverage"],
+    benchmark_pct=benchmark, earnings=earnings if isinstance(earnings, pd.DataFrame) else None, earnings_days=earnings_days,
+    shifts=shifts, news=news, filings=filings, threshold=threshold,
+    conc=hl.concentration(portfolio["merged"]["Weight %"]) if portfolio else None, held=portfolio is not None,
+)
+for title, bullets in sections:
+    st.markdown(f"**{title}**")
+    for b in bullets:
+        st.markdown(f"- {b}")
+st.caption(
+    "Written by rules from the numbers above, with no AI: every sentence comes from data on this page, and it can't see "
+    "anything beyond it. Percent only. Informational, not advice."
+)
+
 anth_key = secret("ANTHROPIC_API_KEY")
-if not anth_key:
-    st.info(
-        "Optional: add `ANTHROPIC_API_KEY` to Secrets to get a plain-English summary of "
-        "everything above. It only runs when you click the button."
-    )
-else:
-    if st.button("Write my brief"):
+if anth_key:
+    st.markdown("**Optional: AI-written version**")
+    if st.button("Write my brief with AI"):
         digest = bl.build_digest(movers, earnings, shifts, news, filings)
         try:
             with st.spinner("Writing…"):
                 text = c_summary(digest, anth_key, secret("ANTHROPIC_MODEL") or "claude-haiku-5-5")
             st.markdown(text)
-            st.caption(
-                "AI-written from the data above. It can be wrong. Check the sections "
-                "above before relying on it."
-            )
+            st.caption("AI-written from the data above. It can be wrong. Check the sections above before relying on it.")
         except Exception as e:
             st.warning(f"Couldn't write the brief: {e}")
