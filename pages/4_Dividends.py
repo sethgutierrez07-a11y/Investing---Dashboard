@@ -83,11 +83,6 @@ def load_activities(accounts: list, day: str) -> dict:
         return {"items": [], "errors": [type(e).__name__], "shape": {}, "range_days": None}
 
 
-@st.cache_data(ttl=43200, show_spinner=False)
-def load_history(symbol: str) -> dict:
-    return dd.fetch_history(symbol)
-
-
 def cfg(df, mapping: dict) -> dict:
     """Column config only for columns that are actually shown."""
     return {k: v for k, v in mapping.items() if k in df.columns}
@@ -118,7 +113,7 @@ act = dl.parse_activities(acts["items"])
 histories: dict = {}
 with st.spinner("Loading each holding's dividend history…"):
     for s in syms:
-        histories[s] = load_history(s)
+        histories[s] = ps.load_history(s)
 failed = [s for s, h in histories.items() if h["error"] and h["error"] != "no history"]
 profiles = {s: dl.dividend_profile(h["divs"], TODAY) for s, h in histories.items() if not h["error"] or h["error"] == "no history"}
 
@@ -309,7 +304,7 @@ with tab_drip:
                          step=0.5, help="0% is the plain baseline. A money-market fund might pay a few percent.") / 100
     years = {"3 years": 3, "5 years": 5, "10 years": 10}.get(horizon)
     if sim_symbol:
-        h = histories.get(sim_symbol) or load_history(sim_symbol)
+        h = histories.get(sim_symbol) or ps.load_history(sim_symbol)
         if h["error"]:
             st.warning(f"Couldn't load history for {sim_symbol}: {h['error']}")
         else:

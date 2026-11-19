@@ -13,6 +13,7 @@ pages = [
     st.Page("pages/2_Holdings.py", title="Holdings", icon="💼", url_path="Holdings"),
     st.Page("pages/3_Strategy_Lab.py", title="Strategy Lab", icon="🧪", url_path="Strategy_Lab"),
     st.Page("pages/4_Dividends.py", title="Dividends", icon="💰", url_path="Dividends"),
+    st.Page("pages/5_Risk.py", title="Risk", icon="🛡️", url_path="Risk"),
 ]
 
 st.navigation(pages).run()
