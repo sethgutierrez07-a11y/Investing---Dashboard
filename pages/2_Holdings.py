@@ -250,14 +250,14 @@ gains = hl.gain_rows(merged)
 st.write("")
 with st.container(border=True):
     st.markdown("**What's working and what isn't**")
-    st.caption("Gain or loss since purchase, per holding (uses SnapTrade's average purchase price).")
+    st.caption("Gain or loss since purchase, per holding (uses SnapTrade's per-share cost basis × shares held).")
     if len(gains) >= 1:
         st.plotly_chart(hc.gain_bars(gains, mode), width="stretch", config=CHART_CFG)
     else:
         cov = hl.cost_coverage(raw)
         st.info(
             "No cost-basis data could be read, so gains can't be shown. "
-            f"Of {cov['positions']} positions, {cov['with_avg_price']} came with an average purchase price, "
+            f"Of {cov['positions']} positions, {cov['with_avg_price']} came with a purchase price (average_purchase_price or cost_basis), "
             f"{cov['with_open_pnl']} with an open P&L figure and {cov['with_tax_lots']} with tax lots. "
             "If SnapTrade's own dashboard shows these, open 'Data shape' at the bottom and share it."
         )

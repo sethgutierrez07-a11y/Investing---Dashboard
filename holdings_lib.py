@@ -112,6 +112,13 @@ CLASS_BY_CODE = {
 }
 
 
+# SnapTrade's newer positions layout names the type in instrument.kind.
+CLASS_BY_KIND = {
+    "stock": "Stock", "preferred_stock": "Stock", "adr": "Stock", "etf": "ETF",
+    "mutualfund": "Fund", "cef": "Fund", "bond": "Bond", "crypto": "Crypto",
+}
+
+
 def find_str(obj: Any, keys: tuple[str, ...], depth: int = 5) -> str | None:
     """First non-empty string stored under any of `keys`, searching nested dicts
     (shallowest first, in the order given) and skipping currency/exchange/type blocks."""
@@ -149,6 +156,11 @@ def classify(position: dict) -> str:
     """ETF / Stock / Fund / Bond / Crypto / Cash equiv. / Other, from SnapTrade's own type info."""
     if position.get("cash_equivalent") is True:
         return "Cash equiv."
+    inst = position.get("instrument")
+    if isinstance(inst, dict):
+        by_kind = CLASS_BY_KIND.get(str(inst.get("kind") or "").lower())
+        if by_kind:
+            return by_kind
     t = find_type_block(position.get("symbol") if isinstance(position.get("symbol"), dict) else position) or {}
     code = str(t.get("code") or "").lower()
     if code in CLASS_BY_CODE:
@@ -183,7 +195,7 @@ def account_label(account: dict) -> str:
 def normalize_positions(account: dict, raw_positions: list[dict], fallback_avg: dict[str, float] | None = None) -> list[dict]:
     label = account_label(account)
     rows = []
-    for p in as_list(raw_positions, ("positions",)):
+    for p in as_list(raw_positions, ("positions", "results")):
         if not isinstance(p, dict):
             continue
         if "units" not in p and "fractional_units" not in p and isinstance(p.get("position"), dict):
@@ -202,6 +214,8 @@ def normalize_positions(account: dict, raw_positions: list[dict], fallback_avg: 
             units = num(p.get("fractional_units"))
         price = num(p.get("price"))
         avg = num(p.get("average_purchase_price"))
+        if not avg:
+            avg = num(p.get("cost_basis"))  # newer layout: per-share book/average purchase price
         if not avg and fallback_avg:
             avg = fallback_avg.get(str(ticker).upper())
         if not units:
@@ -227,7 +241,7 @@ def normalize_positions(account: dict, raw_positions: list[dict], fallback_avg: 
 def avg_price_map(alt_positions: Any) -> dict[str, float]:
     """Ticker -> average purchase price, from a second SnapTrade endpoint (read-only)."""
     out: dict[str, float] = {}
-    for p in as_list(alt_positions, ("positions",)):
+    for p in as_list(alt_positions, ("positions", "results")):
         if not isinstance(p, dict):
             continue
         if "units" not in p and isinstance(p.get("position"), dict):
@@ -235,7 +249,7 @@ def avg_price_map(alt_positions: Any) -> dict[str, float]:
         sym = p.get("symbol")
         scope = sym if isinstance(sym, dict) else p
         ticker = sym if isinstance(sym, str) else (find_str(scope, ("symbol", "raw_symbol", "ticker")) or None)
-        avg = num(p.get("average_purchase_price"))
+        avg = num(p.get("average_purchase_price")) or num(p.get("cost_basis"))
         if ticker and avg:
             out[str(ticker).upper()] = avg
     return out
@@ -289,7 +303,7 @@ def build_portfolio(per_account: list[dict]) -> dict:
                 f"{label}: positions + cash differ from the account total SnapTrade reports by more "
                 f"than 2%. Treat these numbers as approximate."
             )
-        if as_list(item.get("positions"), ("positions",)) and not acct_rows:
+        if as_list(item.get("positions"), ("positions", "results")) and not acct_rows:
             warnings.append(f"{label}: positions came back but none could be read. Data shape may have changed.")
 
     df = pd.DataFrame(rows, columns=POSITION_COLS)
@@ -569,11 +583,11 @@ def cost_coverage(raw_items: list[dict]) -> dict:
     """Counts only (never values): how many positions came with cost data."""
     n = with_avg = with_pnl = with_lots = 0
     for item in raw_items or []:
-        for p in as_list(item.get("positions"), ("positions",)):
+        for p in as_list(item.get("positions"), ("positions", "results")):
             if not isinstance(p, dict):
                 continue
             n += 1
-            if num(p.get("average_purchase_price")):
+            if num(p.get("average_purchase_price")) or num(p.get("cost_basis")):
                 with_avg += 1
             if num(p.get("open_pnl")):
                 with_pnl += 1

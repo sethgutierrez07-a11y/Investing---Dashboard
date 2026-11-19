@@ -501,3 +501,40 @@ def test_holdings_endpoint_failure_is_harmless():
     c = FakeClient(); c.account_information = NoHoldings()
     out = hl.fetch_all(c)
     assert all(o["error"] is None and o["alt_positions"] is None for o in out)
+
+
+# ---- SnapTrade's newer positions layout: {"results": [{"instrument": {"kind", "symbol", ...}, "units": "5", "price": "10", "cost_basis": "8"}]} ----
+def v2_pos(ticker, units, price, cost, kind="stock", cash_eq=None):
+    p = {
+        "instrument": {"kind": kind, "id": "x", "symbol": ticker, "raw_symbol": ticker,
+                       "description": f"{ticker} Corp", "currency": "USD", "exchange": "XNYS", "figi_instrument": {}},
+        "units": str(units), "price": str(price), "cost_basis": None if cost is None else str(cost), "currency": "USD",
+    }
+    if cash_eq is not None:
+        p["cash_equivalent"] = cash_eq
+    return p
+
+
+def test_v2_layout_parses_strings_results_and_cost_basis():
+    body = {"results": [v2_pos("AAPL", 10, 200, 150), v2_pos("VOO", 4, 500, 400, "etf")],
+            "data_freshness": {"as_of": "2026-11-18"}}
+    pf = hl.build_portfolio([item(body)])
+    df = pf["positions"].set_index("Symbol")
+    assert df.loc["AAPL", "Cost basis"] == pytest.approx(1500) and df.loc["AAPL", "Gain"] == pytest.approx(500)
+    assert df.loc["VOO", "Gain %"] == pytest.approx(25.0)
+    assert df.loc["AAPL", "Class"] == "Stock" and df.loc["VOO", "Class"] == "ETF"
+    assert hl.cost_coverage([item(body)])["with_avg_price"] == 2
+
+
+@pytest.mark.parametrize("kind,label", [("stock", "Stock"), ("preferred_stock", "Stock"), ("adr", "Stock"),
+                                         ("etf", "ETF"), ("mutualfund", "Fund"), ("cef", "Fund"),
+                                         ("bond", "Bond"), ("crypto", "Crypto"), ("other", "Other")])
+def test_classify_by_instrument_kind(kind, label):
+    assert hl.classify(v2_pos("X", 1, 1, 1, kind)) == label
+
+
+def test_v2_cash_equivalent_and_missing_cost():
+    body = {"results": [v2_pos("SPAXX", 500, 1, 1, "mutualfund", cash_eq=True), v2_pos("ZZZ", 1, 10, None)]}
+    df = hl.build_portfolio([item(body)])["positions"].set_index("Symbol")
+    assert df.loc["SPAXX", "Class"] == "Cash equiv."
+    assert df["Cost basis"].isna()["ZZZ"] and df["Gain"].isna()["ZZZ"]
