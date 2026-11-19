@@ -10,18 +10,20 @@ from __future__ import annotations
 
 import plotly.graph_objects as go
 
-SANS = "system-ui, -apple-system, 'Segoe UI', sans-serif"
+SANS = "Inter, system-ui, -apple-system, 'Segoe UI', sans-serif"
 
+# Cool slate neutrals to match the app theme (.streamlit/config.toml). "surface" is the chart background
+# the palettes were validated against; "panel" is the tooltip card.
 TOKENS = {
-    "light": {"surface": "#ffffff", "grid": "#e1e0d9", "muted": "#898781", "text2": "#52514e", "blue": "#2a78d6"},
-    "dark": {"surface": "#0e1117", "grid": "#2c2c2a", "muted": "#898781", "text2": "#c3c2b7", "blue": "#3987e5"},
+    "light": {"surface": "#f5f8fc", "panel": "#ffffff", "grid": "#e3eaf3", "muted": "#7b8aa0", "text": "#0f172a", "text2": "#475569", "blue": "#2a78d6"},
+    "dark": {"surface": "#0b1120", "panel": "#111a2e", "grid": "#1d2a45", "muted": "#7b8aa0", "text": "#e6edf7", "text2": "#aab6ca", "blue": "#3987e5"},
 }
 # Entity -> colour (fixed order slots 1-6; the same class is always the same colour)
 CLASS_COLORS = {
     "light": {"ETF": "#2a78d6", "Stock": "#eb6834", "Cash": "#1baf7a", "Fund": "#eda100",
-              "Bond": "#e87ba4", "Crypto": "#008300", "Other": "#898781"},
+              "Bond": "#e87ba4", "Crypto": "#008300", "Other": "#7b8aa0"},
     "dark": {"ETF": "#3987e5", "Stock": "#d95926", "Cash": "#199e70", "Fund": "#c98500",
-             "Bond": "#d55181", "Crypto": "#0ca30c", "Other": "#898781"},
+             "Bond": "#d55181", "Crypto": "#0ca30c", "Other": "#7b8aa0"},
 }
 GOOD, CRITICAL = "#0ca30c", "#d03b3b"
 DARK_TEXT_ON = {"Fund"}  # yellow fills take dark label ink, everything else white
@@ -35,7 +37,7 @@ def _base_layout(mode: str, height: int) -> dict:
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
         font=dict(family=SANS, size=13, color=t["text2"]),
-        hoverlabel=dict(font=dict(family=SANS)),
+        hoverlabel=dict(bgcolor=t["panel"], bordercolor=t["grid"], font=dict(family=SANS, size=13, color=t["text"])),
     )
 
 

@@ -13,12 +13,15 @@ import datetime as dt
 import pandas as pd
 import streamlit as st
 
+import ui
+
 import brief_lib as bl
 import brief_text as bt
 import holdings_lib as hl
 import portfolio_state as ps
 
 st.set_page_config(page_title="Daily Brief", layout="wide")
+ui.apply()
 
 
 def secret(name: str):

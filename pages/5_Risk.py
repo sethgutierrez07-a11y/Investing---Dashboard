@@ -11,6 +11,8 @@ import time
 import pandas as pd
 import streamlit as st
 
+import ui
+
 import holdings_lib as hl
 import lab_charts as lc
 import lab_lib as lab
@@ -20,6 +22,7 @@ import risk_lib as rl
 import risk_text as rt
 
 st.set_page_config(page_title="Risk", layout="wide")
+ui.apply()
 
 CHART_CFG = {"displayModeBar": False}
 MAX_HOLDINGS = 20

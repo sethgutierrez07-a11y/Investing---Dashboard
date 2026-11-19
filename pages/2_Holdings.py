@@ -15,12 +15,15 @@ import time
 
 import streamlit as st
 
+import ui
+
 import brief_lib as bl
 import holdings_charts as hc
 import holdings_lib as hl
 import portfolio_state as ps
 
 st.set_page_config(page_title="Holdings", layout="wide")
+ui.apply()
 
 GOOD, CRITICAL = "#0ca30c", "#d03b3b"
 CHART_CFG = {"displayModeBar": False}

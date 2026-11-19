@@ -14,6 +14,8 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+import ui
+
 import datetime as dt
 
 import holdings_lib as hl
@@ -21,6 +23,7 @@ import idea_lib as il
 import portfolio_state as ps
 
 st.set_page_config(page_title="Investing Dashboard", layout="wide")
+ui.apply()
 
 # ---------- Config ----------
 FINNHUB_BASE = "https://finnhub.io/api/v1"
@@ -108,7 +111,7 @@ def render_consensus_donut(trend: dict):
         go.Pie(
             labels=[s[0] for s in slices],
             values=[s[1] for s in slices],
-            marker=dict(colors=[s[2] for s in slices], line=dict(color="#ffffff", width=2)),
+            marker=dict(colors=[s[2] for s in slices], line=dict(color="rgba(0,0,0,0)", width=3)),
             hole=0.6,
             sort=False,  # keep Strong Buy -> Strong Sell order
             direction="clockwise",
@@ -293,12 +296,17 @@ def render_stock_of_the_day(api_key, exclude):
 
 
 def main():
+    ui.eyebrow("Personal research terminal")
     st.title("📊 Investing Dashboard")
     st.caption(
         "Live quotes and analyst consensus, built around your holdings once unlocked. Not financial advice — "
         "analyst ratings skew bullish and often lag price; use alongside "
         "your own research."
     )
+
+    status_box = st.container()  # filled once the quotes below have loaded
+    ui.nav_tiles()
+    st.write("")
 
     api_key = get_api_key()
     if not api_key:
@@ -346,6 +354,9 @@ def main():
             rows.append({"Symbol": symbol, "Name": f"Error: {e}"})
 
     df = pd.DataFrame(rows)
+
+    with status_box:
+        ui.status_strip(ui.data_status(quotes, ps.configured(), ps.is_unlocked(), portfolio is not None))
 
     if portfolio:
         render_portfolio_headline(portfolio, quotes)
