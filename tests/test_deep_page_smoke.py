@@ -109,15 +109,61 @@ def test_company_page_renders_summary_tabs_and_charts(monkeypatch):
     assert heads(st) == ["AAPL Inc (AAPL)"] and snap == []                         # locked: never touched the brokerage
     t = md(st)
     assert "What looks good" in t and "What to watch" in t and "Bottom line" in t
-    assert [c.args[0] for c in st.tabs.call_args_list][-1] == ["📊 Key numbers", "📈 Price, risk & dividends", "🧑‍🏫 Analysts & news", "🧮 How it's scored"]
+    assert [c.args[0] for c in st.tabs.call_args_list][-1] == ["📊 Key numbers", "📈 Price, risk & dividends", "⏳ How long to hold", "🧑‍🏫 Analysts & news", "🧮 How it's scored"]
     assert "Analyst consensus" in t and "Recent headlines" in t and "Next earnings report" in t
 
 
 def test_chart_set_is_price_growth_falls_and_analysts(monkeypatch):
     st = make_st(typed="AAPL")
     run(monkeypatch, st)
-    # price chart, growth-vs-S&P, falls-from-peak, analyst bars = 4 charts
-    assert st.plotly_chart.call_count == 4
+    # price chart, growth-vs-S&P, falls-from-peak, holding-period bars, analyst bars = 5 charts
+    assert st.plotly_chart.call_count == 5
+
+
+def all_frames(st):
+    return [c.args[0] for c in st.dataframe.call_args_list if c.args and isinstance(c.args[0], pd.DataFrame)]
+
+
+def test_every_table_has_unique_named_columns(monkeypatch):
+    """Streamlit hands tables to pyarrow, which rejects duplicate (or blank twin) column names; a mock never notices."""
+    for kw in ({}, {"unlocked": True}):
+        st = make_st(typed="AAPL", **kw)
+        run(monkeypatch, st)
+        frames = all_frames(st)
+        assert len(frames) >= 6
+        for f in frames:
+            cols = [str(c) for c in f.columns]
+            assert len(set(cols)) == len(cols) and all(c.strip() for c in cols), cols
+            f.to_dict("records")                                           # must also be convertible
+
+
+def test_how_long_to_hold_section_and_tab(monkeypatch):
+    st = make_st(typed="AAPL")
+    run(monkeypatch, st)
+    assert "How long to hold it" in [c.args[0] for c in st.subheader.call_args_list]
+    t = md(st)
+    assert "Planning window:" in t and "**History:**" in t and "Long is not forever" in t
+    assert "How often holding it paid off" in t and "What would make a long hold worth a second look" in t
+    frames = all_frames(st)
+    hold = next(f for f in frames if "Ended in a gain" in f.columns)
+    assert list(hold["Held for"]) == ["1 year", "3 years", "5 years"]
+    assert hold["Ended in a gain"].between(0, 100).all() and (hold["Worst, total"] <= hold["Best, total"]).all()
+    assert any(list(f.columns) == ["Step", "Rule"] for f in frames)
+
+
+def test_how_long_to_hold_works_for_funds_and_with_short_history(monkeypatch):
+    st = make_st(typed="VOO")
+    run(monkeypatch, st, http=Fh(fund={"VOO"}))
+    t = md(st)
+    assert "Planning window:" in t and "at least 5 years" in t.lower() and "The dividend" not in t
+    short = lambda sym, years=8: {**fake_history(sym), "prices": fake_history(sym)["prices"].iloc[-150:]}  # noqa: E731
+    st2 = make_st(typed="AAPL")
+    run(monkeypatch, st2, history=short)
+    t2 = md(st2)
+    assert "not enough price history to test" in t2.lower()
+    st3 = make_st(typed="AAPL")
+    run(monkeypatch, st3, history=lambda sym, years=8: {"prices": pd.Series(dtype=float), "divs": pd.Series(dtype=float), "error": "no history"})
+    assert "isn't enough price history to say" in md(st3)
 
 
 def test_key_numbers_are_grouped_with_read_labels(monkeypatch):

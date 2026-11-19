@@ -18,6 +18,7 @@ import brief_lib as bl
 import deep_charts as dc
 import deep_lib as dlib
 import deep_text as dtx
+import hold_lib as hl
 import dividend_lib as dl
 import idea_lib as il
 import idea_state as ist
@@ -148,6 +149,9 @@ if key:
 fund = bool(key) and metrics is not None and dlib.is_fund(profile, metrics)
 ev = None if (fund or not metrics) else dlib.assess(symbol, quote, metrics, trends, stats, div, earn[0] if earn else None)
 held_ctx = dlib.held_context(symbol, weights) if portfolio else None
+windows = hl.history_windows(prices, divs) if len(prices) else []
+recov = hl.recoveries(prices, divs) if len(prices) else None
+hz = hl.horizon(stats, recov, ev, fund, metrics)
 
 # ---------- Header ----------
 name = (profile or {}).get("name") or symbol
@@ -200,12 +204,17 @@ if ev is not None:
         st.markdown("**How it fits you**")
         for b in sections["How it fits you"]:
             st.markdown(f"- {ui.esc(b)}")
+st.subheader("How long to hold it")
+if hz:
+    ui.status_strip([(f"Planning window: {hz['text']}", "info"), (hz["style"], "info")])
+for b in dtx.holding_summary(symbol, hz, windows, recov, div, held_ctx, fund):
+    st.markdown(f"- {ui.esc(b)}")
 st.caption("Written by rules from the numbers on this page, with no AI. Describes the past, not the future; informational, not financial advice.")
 st.divider()
 
 # ---------- Details ----------
-tabs = st.tabs(["📊 Key numbers", "📈 Price, risk & dividends", "🧑‍🏫 Analysts & news", "🧮 How it's scored"])
-t_keys, t_price, t_people, t_rules = tabs
+tabs = st.tabs(["📊 Key numbers", "📈 Price, risk & dividends", "⏳ How long to hold", "🧑‍🏫 Analysts & news", "🧮 How it's scored"])
+t_keys, t_price, t_hold, t_people, t_rules = tabs
 
 with t_keys:
     rows = dlib.key_numbers(metrics)
@@ -280,10 +289,42 @@ with t_price:
             rows.append(("Years of raises in a row", str(div.get("streak") or 0)))
             if div.get("next_ex"):
                 rows.append(("Next ex-dividend date (estimated)", f"{div['next_ex']:%b %d, %Y}"))
-            st.dataframe(pd.DataFrame(rows, columns=["", ""]), hide_index=True, width="stretch")
+            st.dataframe(pd.DataFrame(rows, columns=["Item", "Detail"]), hide_index=True, width="stretch")
             st.caption("From the payment history. Dividends can be cut or stopped, and the next date is an estimate.")
         else:
             st.caption("No regular dividend found in the price history" + (f" ({div['reason']})." if div and div.get("reason") else "."))
+
+with t_hold:
+    st.markdown("##### How often holding it paid off")
+    if windows:
+        st.plotly_chart(dc.hold_chart(windows, mode), width="stretch", config=CHART_CFG)
+        tbl = pd.DataFrame([{"Held for": f"{w['years']} year" + ("s" if w["years"] > 1 else ""), "Periods tested": w["periods"],
+                             "Ended in a gain": w["share_gain"] * 100,
+                             "Typical, per year": (w["median_per_year"] or 0) * 100, "Worst, total": w["worst_total"] * 100,
+                             "Best, total": w["best_total"] * 100} for w in windows])
+        st.dataframe(tbl, hide_index=True, width="stretch", column_config={
+            "Ended in a gain": st.column_config.NumberColumn(format="%.0f%%"),
+            "Typical, per year": st.column_config.NumberColumn(format="%+.1f%%"),
+            "Worst, total": st.column_config.NumberColumn(format="%+.0f%%"),
+            "Best, total": st.column_config.NumberColumn(format="%+.0f%%")})
+        st.caption("Every possible start date in its price history, dividends reinvested. Periods overlap and come from one stretch of history, so this shows a range, not a forecast.")
+    else:
+        st.caption("Not enough price history to test holding periods (needs a bit over a year per length tested).")
+    st.markdown("##### Its biggest falls and how long they took to heal")
+    eps = (recov or {}).get("episodes") or []
+    if eps:
+        st.dataframe(pd.DataFrame([{"Peak": f"{e['peak']:%b %Y}", "Low point": f"{e['trough']:%b %Y}", "Fall": e["depth"] * 100,
+                                    "Back to the old high": f"{e['recovered']:%b %Y}" if e["recovered"] is not None else "Not yet",
+                                    "Peak to recovery": f"{e['total_days'] / 365.25:.1f} years" if e["total_days"] is not None else "Still waiting"} for e in eps]),
+                     hide_index=True, width="stretch")
+        st.caption("Falls of 15% or more over roughly the past ten years. Coming back is not guaranteed.")
+    else:
+        st.caption("No fall of 15% or more in the available history.")
+    st.markdown("##### What would make a long hold worth a second look")
+    for r in hl.rechecks(stats, ev, div, earn[0] if earn else None, fund):
+        st.markdown(f"- {'🟡' if r['flag'] else '🟢'} **{r['what']}.** {ui.esc(r['why'])} *Now: {ui.esc(r['now'])}*")
+    st.caption("These are prompts to look again, not sell signals. How the window is chosen:")
+    st.dataframe(pd.DataFrame(hl.RULES, columns=["Step", "Rule"]), hide_index=True, width="stretch")
 
 with t_people:
     if not key:

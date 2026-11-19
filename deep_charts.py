@@ -52,3 +52,17 @@ def analyst_bars(trend: dict, mode: str = "dark", height: int = 230) -> go.Figur
     fig.update_xaxes(showgrid=False, showticklabels=False)
     fig.update_yaxes(showgrid=False, tickfont=dict(color=t["text2"]))
     return fig
+
+
+def hold_chart(windows: list[dict], mode: str = "dark", height: int = 240) -> go.Figure:
+    """Share of past holding periods that ended in a gain, one bar per length, every bar labelled."""
+    t, c = TOKENS[mode], SERIES[mode]
+    labels = [f"{w['years']} year" + ("s" if w["years"] > 1 else "") for w in windows]
+    vals = [w["share_gain"] * 100 for w in windows]
+    fig = go.Figure(go.Bar(x=labels, y=vals, marker_color=c["a"], text=[f"{v:.0f}%" for v in vals], textposition="outside", cliponaxis=False,
+                           customdata=[w["periods"] for w in windows],
+                           hovertemplate="Held %{x}: gain in %{y:.0f}% of %{customdata:,} tested periods<extra></extra>"))
+    fig.update_layout(**_layout(mode, height, showlegend=False, margin=dict(l=4, r=4, t=24, b=8), bargap=0.45))
+    fig.update_xaxes(showgrid=False, tickfont=dict(color=t["text2"]))
+    fig.update_yaxes(range=[0, 115], showgrid=True, gridcolor=t["grid"], zeroline=False, ticksuffix="%", tickfont=dict(color=t["muted"]))
+    return fig
