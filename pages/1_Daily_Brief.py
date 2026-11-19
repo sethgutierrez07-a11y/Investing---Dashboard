@@ -14,11 +14,10 @@ import pandas as pd
 import streamlit as st
 
 import brief_lib as bl
+import holdings_lib as hl
+import portfolio_state as ps
 
 st.set_page_config(page_title="Daily Brief", layout="wide")
-
-DEFAULT_WATCHLIST = ["AAPL", "MSFT", "VOO"]
-MAX_TICKERS = 15  # Finnhub free tier allows ~60 calls/minute
 
 
 def secret(name: str):
@@ -67,7 +66,7 @@ def c_summary(digest, key, model):
 # ---------- Page ----------
 st.title("🗞️ Daily Brief")
 st.caption(
-    "What changed since yesterday on your watchlist. Informational only, not "
+    "What changed since yesterday on your holdings and watchlist. Informational only, not "
     "financial advice. This page is read-only and never places trades."
 )
 
@@ -76,21 +75,18 @@ if not api_key:
     st.error("No `FINNHUB_API_KEY` found. Add it under ⋮ → Settings → Secrets.")
     st.stop()
 
+ps.unlock_sidebar()
+portfolio = ps.get_portfolio()
+tickers, held = ps.watchlist_sidebar(portfolio)
+weights = ps.weight_lookup(portfolio)
 with st.sidebar:
     st.header("Brief settings")
-    default_list = st.session_state.get("watchlist", DEFAULT_WATCHLIST)
-    raw = st.text_area("Tickers (comma-separated)", value=", ".join(default_list), height=80)
-    tickers = []
-    for t in raw.split(","):
-        t = t.strip().upper()
-        if t and t not in tickers:
-            tickers.append(t)
-    if len(tickers) > MAX_TICKERS:
-        st.warning(f"Using the first {MAX_TICKERS} tickers to stay inside free API limits.")
-        tickers = tickers[:MAX_TICKERS]
     threshold = st.slider("Flag moves bigger than (%)", 0.5, 10.0, 2.0, 0.5)
     news_days = st.slider("News & filings lookback (days)", 1, 7, 3)
     earnings_days = st.slider("Earnings look-ahead (days)", 7, 30, 14)
+
+if portfolio is None and ps.configured() and not ps.is_unlocked():
+    st.info("Showing a sample watchlist. Unlock in the sidebar to build this brief around your real holdings.")
 
 if not tickers:
     st.info("Add at least one ticker in the sidebar.")
@@ -106,8 +102,27 @@ for sym in tickers:
     except Exception:
         quotes[sym] = None
 movers = bl.build_movers(quotes, threshold)
+contrib = hl.contributions(portfolio["merged"], quotes) if portfolio else None
+if portfolio:
+    movers["Weight %"] = movers["Symbol"].map(weights)
+    movers["Impact (pp)"] = movers["Symbol"].map(dict(zip(contrib["Symbol"], contrib["Contribution pp"])))
 
 st.subheader("1 · Movers")
+if portfolio:
+    move = hl.day_change(portfolio["holdings_df"], {k: v for k, v in quotes.items() if v})
+    if move["pct"] is not None:
+        st.metric(
+            "Your portfolio today (est.)",
+            hl.pct(move["pct"], digits=2),
+            help=f"Weighted from live quotes; covers {move['coverage']*100:.0f}% of your invested value. Percent only, no dollar amounts on this page.",
+        )
+    if contrib is not None and not contrib.empty:
+        top = contrib.head(3)
+        st.caption(
+            "Biggest effect on you today: "
+            + ", ".join(f"{r['Symbol']} ({r['Contribution pp']:+.2f} pp)" for _, r in top.iterrows())
+            + ". pp = percentage points of your portfolio (weight × move)."
+        )
 big = movers[movers["Flag"].str.contains("big move", na=False)]
 if big.empty:
     st.success(f"No watchlist move bigger than {threshold:.1f}% today.")
@@ -123,6 +138,8 @@ st.dataframe(
     column_config={
         "Price": st.column_config.NumberColumn(format="$%.2f"),
         "Change %": st.column_config.NumberColumn(format="%+.2f%%"),
+        "Weight %": st.column_config.NumberColumn(format="%.1f%%"),
+        "Impact (pp)": st.column_config.NumberColumn(format="%+.2f"),
     },
 )
 
@@ -134,7 +151,15 @@ try:
     if earnings.empty:
         st.info(f"No earnings reports for your tickers in the next {earnings_days} days.")
     else:
-        st.dataframe(earnings, hide_index=True, width="stretch")
+        if portfolio:
+            earnings = earnings.assign(**{"Weight %": earnings["Symbol"].map(weights)})
+            exposed = sum(weights.get(x, 0.0) for x in earnings["Symbol"].unique())
+            if exposed > 0:
+                st.warning(f"{exposed:.0f}% of your invested money is in companies reporting in the next {earnings_days} days.")
+        st.dataframe(
+            earnings, hide_index=True, width="stretch",
+            column_config={"Weight %": st.column_config.NumberColumn(format="%.1f%%")},
+        )
 except Exception as e:
     earnings = pd.DataFrame()
     st.warning(f"Couldn't load the earnings calendar: {e}")
@@ -154,12 +179,16 @@ rows = [
         "Score before": v["score_before"],
         "Score now": v["score_now"],
         "Change": v["delta"],
+        **({"Weight %": weights.get(s)} if portfolio else {}),
     }
     for s, v in shifts.items()
     if v
 ]
 if rows:
-    st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+    st.dataframe(
+        pd.DataFrame(rows), hide_index=True, width="stretch",
+        column_config={"Weight %": st.column_config.NumberColumn(format="%.1f%%")},
+    )
     st.caption(
         "Score runs from -2 (all Strong Sell) to +2 (all Strong Buy), comparing the "
         "latest monthly analyst snapshot with the prior one. Analyst ratings skew "

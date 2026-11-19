@@ -18,6 +18,7 @@ import streamlit as st
 import brief_lib as bl
 import holdings_charts as hc
 import holdings_lib as hl
+import portfolio_state as ps
 
 st.set_page_config(page_title="Holdings", layout="wide")
 
@@ -91,14 +92,8 @@ with st.sidebar:
         st.rerun()
 
 
-@st.cache_data(ttl=300, show_spinner="Reading your accounts…")
-def load_holdings():
-    client = hl.make_client(client_id, consumer_key)
-    return hl.fetch_all(client)
-
-
 try:
-    raw = load_holdings()
+    raw = ps.load_raw()
 except Exception as e:
     st.title("💼 Holdings")
     st.error(
@@ -259,7 +254,13 @@ with st.container(border=True):
     if len(gains) >= 1:
         st.plotly_chart(hc.gain_bars(gains, mode), width="stretch", config=CHART_CFG)
     else:
-        st.info("No cost-basis data came back, so gains can't be shown.")
+        cov = hl.cost_coverage(raw)
+        st.info(
+            "No cost-basis data could be read, so gains can't be shown. "
+            f"Of {cov['positions']} positions, {cov['with_avg_price']} came with an average purchase price, "
+            f"{cov['with_open_pnl']} with an open P&L figure and {cov['with_tax_lots']} with tax lots. "
+            "If SnapTrade's own dashboard shows these, open 'Data shape' at the bottom and share it."
+        )
 
 # ---------- Insights ----------
 notes = hl.insights(summary, conc, mix, merged)
