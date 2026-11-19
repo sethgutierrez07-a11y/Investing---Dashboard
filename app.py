@@ -11,6 +11,7 @@ pages = [
     st.Page("dashboard.py", title="Investing Dashboard", icon="📊", url_path="Investing_Dashboard", default=True),
     st.Page("pages/1_Daily_Brief.py", title="Daily Brief", icon="🗞️", url_path="Daily_Brief"),
     st.Page("pages/2_Holdings.py", title="Holdings", icon="💼", url_path="Holdings"),
+    st.Page("pages/3_Strategy_Lab.py", title="Strategy Lab", icon="🧪", url_path="Strategy_Lab"),
 ]
 
 st.navigation(pages).run()
