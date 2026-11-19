@@ -107,7 +107,7 @@ def text_of(st):
     return " ".join(out)
 
 
-@pytest.mark.parametrize("page", ["app.py", "pages/1_Daily_Brief.py"])
+@pytest.mark.parametrize("page", ["dashboard.py", "pages/1_Daily_Brief.py"])
 def test_locked_visitor_gets_sample_list_and_no_snaptrade_call(monkeypatch, page):
     st, http, snap = run(monkeypatch, page, unlocked=False)
     assert snap == []                                   # never touched the brokerage
@@ -115,7 +115,7 @@ def test_locked_visitor_gets_sample_list_and_no_snaptrade_call(monkeypatch, page
     assert "Unlock in the sidebar" in text_of(st)
 
 
-@pytest.mark.parametrize("page", ["app.py", "pages/1_Daily_Brief.py"])
+@pytest.mark.parametrize("page", ["dashboard.py", "pages/1_Daily_Brief.py"])
 def test_unlocked_visitor_gets_real_holdings_largest_first(monkeypatch, page):
     st, http, snap = run(monkeypatch, page, unlocked=True)
     assert snap                                         # portfolio was read
@@ -150,11 +150,11 @@ def test_wrong_snaptrade_failure_still_renders_sample(monkeypatch):
     for m in ("holdings_charts", "brief_lib", "portfolio_state"):
         sys.modules.pop(m, None)
     st.text_area.return_value = "AAPL"
-    runpy.run_path(str(ROOT / "app.py"), run_name="__main__")  # must not raise
+    runpy.run_path(str(ROOT / "dashboard.py"), run_name="__main__")  # must not raise
     assert st.dataframe.called
 
 
-@pytest.mark.parametrize("page", ["app.py", "pages/1_Daily_Brief.py"])
+@pytest.mark.parametrize("page", ["dashboard.py", "pages/1_Daily_Brief.py"])
 @pytest.mark.parametrize("missing", ["all", "some"])
 def test_unlocked_with_missing_cost_basis_does_not_crash(monkeypatch, page, missing):
     from test_holdings_page_smoke import rp
@@ -175,7 +175,7 @@ def tab_labels(st):
 
 
 def test_stock_of_the_day_shows_pick_with_pros_cons_and_excludes_holdings(monkeypatch):
-    st, http, _ = run(monkeypatch, "app.py", unlocked=True, ideas=True)
+    st, http, _ = run(monkeypatch, "dashboard.py", unlocked=True, ideas=True)
     text = markdown_text(st) + text_of(st)
     assert "Stock of the day" in text and "What looks good" in text and "What to watch" in text
     pick = next(l.split("### ")[1].split(" ")[0].strip("'\"),") for l in [markdown_text(st)] if "### " in l)
@@ -185,20 +185,20 @@ def test_stock_of_the_day_shows_pick_with_pros_cons_and_excludes_holdings(monkey
 
 
 def test_stock_of_the_day_survives_rate_limit(monkeypatch):
-    st, _, _ = run(monkeypatch, "app.py", unlocked=True, ideas=True, http=Http(fail_metric=True))
+    st, _, _ = run(monkeypatch, "dashboard.py", unlocked=True, ideas=True, http=Http(fail_metric=True))
     assert "Couldn't screen enough candidates" in text_of(st)
     assert st.dataframe.called                          # rest of the page still rendered
 
 
 def test_analyst_section_splits_stocks_and_funds_unlocked(monkeypatch):
-    st, _, _ = run(monkeypatch, "app.py", unlocked=True)
+    st, _, _ = run(monkeypatch, "dashboard.py", unlocked=True)
     assert tab_labels(st) == [["AAPL", "MSFT"]]         # VOO (an ETF) gets no analyst tab
     assert "ETFs & funds" in markdown_text(st)
     assert "no analyst ratings" in text_of(st)
 
 
 def test_analyst_section_splits_stocks_and_funds_locked_sample_list(monkeypatch):
-    st, http, _ = run(monkeypatch, "app.py", unlocked=False)
+    st, http, _ = run(monkeypatch, "dashboard.py", unlocked=False)
     assert tab_labels(st) == [["AAPL", "MSFT"]]         # VOO has no company profile -> treated as a fund
     assert "ETFs & funds" in markdown_text(st)
     assert [p["symbol"] for u, p in http.urls if u.endswith("/stock/recommendation")] == ["AAPL", "MSFT"]
@@ -207,7 +207,29 @@ def test_analyst_section_splits_stocks_and_funds_locked_sample_list(monkeypatch)
 def test_brief_writes_free_rule_based_summary_locked_and_unlocked(monkeypatch):
     st, http, _ = run(monkeypatch, "pages/1_Daily_Brief.py", unlocked=True)
     text = markdown_text(st)
-    assert "Bottom line" in text and "S&P 500" in text and "no AI" in text_of(st)
+    assert tab_labels(st)[0][0] == "Bottom line" and "S&P 500" in text and "no AI" in text_of(st)
+    assert "pp = percentage points" in text_of(st)
     assert any(p["symbol"] == "SPY" for u, p in http.urls if u.endswith("/quote"))
     st2, _, _ = run(monkeypatch, "pages/1_Daily_Brief.py", unlocked=False)
-    assert "Bottom line" in markdown_text(st2) and "simple average" in markdown_text(st2)
+    assert tab_labels(st2)[0][0] == "Bottom line" and "simple average" in markdown_text(st2)
+
+
+def test_brief_comes_before_the_data_it_summarizes(monkeypatch):
+    st, _, _ = run(monkeypatch, "pages/1_Daily_Brief.py", unlocked=True)
+    heads = [c.args[0] for c in st.subheader.call_args_list]
+    assert heads[:2] == ["Today's brief", "The data behind it"]
+    assert st.container.called
+
+
+def test_entry_point_gives_pages_professional_names(monkeypatch):
+    st = MagicMock(name="streamlit")
+    st.Page.side_effect = lambda path, **k: (path, k)
+    monkeypatch.setitem(sys.modules, "streamlit", st)
+    runpy.run_path(str(ROOT / "app.py"), run_name="__main__")
+    pages = st.navigation.call_args.args[0]
+    assert [k["title"] for _, k in pages] == ["Investing Dashboard", "Daily Brief", "Holdings"]
+    assert [p for p, _ in pages] == ["dashboard.py", "pages/1_Daily_Brief.py", "pages/2_Holdings.py"]
+    assert sum(1 for _, k in pages if k.get("default")) == 1
+    for p, _ in pages:
+        assert (ROOT / p).exists()                       # a typo here would break the whole app
+    st.navigation.return_value.run.assert_called_once()

@@ -95,6 +95,13 @@ if not tickers:
 
 today = dt.date.today()
 
+# The written brief goes first on the page, but it needs every number below, so it
+# is filled in at the bottom of the script into this placeholder.
+st.subheader("Today's brief")
+brief_box = st.container()
+st.divider()
+st.subheader("The data behind it")
+
 # 1) Movers ------------------------------------------------------------
 quotes = {}
 for sym in tickers:
@@ -108,7 +115,7 @@ if portfolio:
     movers["Weight %"] = movers["Symbol"].map(weights)
     movers["Impact (pp)"] = movers["Symbol"].map(dict(zip(contrib["Symbol"], contrib["Contribution pp"])))
 
-st.subheader("1 · Movers")
+st.markdown("##### Movers")
 move = {"pct": None, "coverage": 0.0}
 if portfolio:
     move = hl.day_change(portfolio["holdings_df"], {k: v for k, v in quotes.items() if v})
@@ -146,7 +153,7 @@ st.dataframe(
 )
 
 # 2) Earnings ----------------------------------------------------------
-st.subheader("2 · Earnings coming up")
+st.markdown("##### Earnings coming up")
 try:
     cal = c_earnings(today, today + dt.timedelta(days=earnings_days), api_key)
     earnings = bl.filter_earnings(cal, tickers, today)
@@ -167,7 +174,7 @@ except Exception as e:
     st.warning(f"Couldn't load the earnings calendar: {e}")
 
 # 3) Analyst shifts ----------------------------------------------------
-st.subheader("3 · Analyst sentiment shifts")
+st.markdown("##### Analyst sentiment shifts")
 shifts = {}
 for sym in tickers:
     try:
@@ -200,7 +207,7 @@ else:
     st.info("No analyst trend data available for these tickers.")
 
 # 4) News --------------------------------------------------------------
-st.subheader("4 · Headlines")
+st.markdown("##### Headlines")
 news = {}
 start = today - dt.timedelta(days=news_days)
 for sym in tickers:
@@ -222,7 +229,7 @@ if not any_news:
     st.info("No recent headlines (ETFs like VOO often have none).")
 
 # 5) SEC filings -------------------------------------------------------
-st.subheader("5 · SEC filings (8-K and insider Form 4)")
+st.markdown("##### SEC filings (8-K and insider Form 4)")
 ua = secret("SEC_USER_AGENT")
 filings = {}
 if not ua:
@@ -255,8 +262,7 @@ else:
     except Exception as e:
         st.warning(f"Couldn't load SEC filings: {e}")
 
-# 6) Written brief -----------------------------------------------------
-st.subheader("6 · Written brief")
+# Written brief (fills the placeholder at the top) ---------------------
 try:
     spy = c_quote("SPY", api_key)  # the market, for comparison
     benchmark = spy.get("dp") if spy and spy.get("c") else None
@@ -268,24 +274,35 @@ sections = bt.write_brief(
     shifts=shifts, news=news, filings=filings, threshold=threshold,
     conc=hl.concentration(portfolio["merged"]["Weight %"]) if portfolio else None, held=portfolio is not None,
 )
-for title, bullets in sections:
-    st.markdown(f"**{title}**")
-    for b in bullets:
-        st.markdown(f"- {b}")
-st.caption(
-    "Written by rules from the numbers above, with no AI: every sentence comes from data on this page, and it can't see "
-    "anything beyond it. Percent only. Informational, not advice."
-)
+with brief_box:
+    if sections:
+        tabs = st.tabs([title for title, _ in sections])
+        for tab, (_, bullets) in zip(tabs, sections):
+            with tab:
+                for b in bullets:
+                    st.markdown(f"- {b}")
+        if portfolio:
+            st.caption(
+                "pp = percentage points of your whole portfolio. If a stock is 25% of your money and falls 4%, "
+                "your portfolio loses 1.00 pp (25% × 4%)."
+            )
+    else:
+        st.info("Nothing to summarize yet.")
+    st.caption(
+        "Written by rules from the numbers below, with no AI: every sentence comes from data on this page, and it can't see "
+        "anything beyond it. Percent only. Informational, not advice."
+    )
 
-anth_key = secret("ANTHROPIC_API_KEY")
-if anth_key:
-    st.markdown("**Optional: AI-written version**")
-    if st.button("Write my brief with AI"):
-        digest = bl.build_digest(movers, earnings, shifts, news, filings)
-        try:
-            with st.spinner("Writing…"):
-                text = c_summary(digest, anth_key, secret("ANTHROPIC_MODEL") or "claude-haiku-5-5")
-            st.markdown(text)
-            st.caption("AI-written from the data above. It can be wrong. Check the sections above before relying on it.")
-        except Exception as e:
-            st.warning(f"Couldn't write the brief: {e}")
+with brief_box:
+    anth_key = secret("ANTHROPIC_API_KEY")
+    if anth_key:
+        st.markdown("**Optional: AI-written version**")
+        if st.button("Write my brief with AI"):
+            digest = bl.build_digest(movers, earnings, shifts, news, filings)
+            try:
+                with st.spinner("Writing…"):
+                    text = c_summary(digest, anth_key, secret("ANTHROPIC_MODEL") or "claude-haiku-5-5")
+                st.markdown(text)
+                st.caption("AI-written from the data below. It can be wrong. Check the sections below before relying on it.")
+            except Exception as e:
+                st.warning(f"Couldn't write the brief: {e}")
