@@ -13,13 +13,18 @@ your Fidelity login and never calls any trading endpoint.
 
 import time
 
+import pandas as pd
 import streamlit as st
 
 import ui
 
+import balance_charts as bc
+import balance_data as bd
+import balance_lib as bal
 import brief_lib as bl
 import holdings_charts as hc
 import holdings_lib as hl
+import idea_state as ist
 import portfolio_state as ps
 
 st.set_page_config(page_title="Holdings", layout="wide")
@@ -247,6 +252,83 @@ with right.container(border=True):
             "Measured per ticker. An ETF counts as one holding here even though it contains "
             "many companies, so a portfolio of broad ETFs looks more concentrated than it really is."
         )
+
+# ---------- Balance check ----------
+st.write("")
+st.subheader("⚖️ Balance check")
+st.caption("Percent-only. Compares your mix with a reference mix you choose and with the S&P 500's sector weights. Areas to look at, not buy signals.")
+preset = st.selectbox("Reference mix", list(bd.PRESETS), index=list(bd.PRESETS).index(bd.DEFAULT_PRESET), key="bal_preset",
+                      help="A common starting point, not a recommendation. Pick the one closest to how you want to invest.")
+st.caption(f"**{preset}:** {bd.PRESETS[preset]['blurb']} ({bd.PRESETS[preset]['stocks']}% stocks, {bd.PRESETS[preset]['bonds']}% bonds, {bd.PRESETS[preset]['cash']}% cash.)")
+
+profiles = {}
+if fh_key:
+    for _, r in table_merged.iterrows():
+        if bal.needs_profile(r["Symbol"], r["Class"]) and r["Symbol"] != "?" and len(profiles) < 25:
+            try:
+                profiles[r["Symbol"]] = ist.profile(r["Symbol"], fh_key)
+            except Exception:  # noqa: BLE001 - one failed lookup just leaves that stock unplaced
+                pass
+cash_w = float(summary["cash_pct"] or 0.0)
+bal_rows = [{"symbol": r["Symbol"], "class": r["Class"], "weight": float(r["Weight %"] or 0.0)} for _, r in table_merged.iterrows()]
+if cash_w > 0:
+    bal_rows.append({"symbol": "CASH", "class": "Cash equiv.", "weight": cash_w})
+ex = bal.build(bal_rows, profiles)
+
+pick = None
+if fh_key:
+    try:
+        idea = ist.screen_today(fh_key, tuple(sorted(ist.exclusions(set(ps.held_symbols({"merged": merged}))))), ui.today_central().toordinal(),
+                                st.session_state.get("idea_offset", 0))
+        if idea.get("best"):
+            sym = idea["best"]["symbol"]
+            pick = {"symbol": sym, "sector": bal.sector_for_stock(sym, ist.profile(sym, fh_key).get("finnhubIndustry"))}
+    except Exception:  # noqa: BLE001
+        pick = None
+
+t_assets, t_sectors, t_ideas = st.tabs(["🧱 Asset mix", "🏭 Sectors", "💡 Ideas to browse"])
+with t_assets:
+    arows = bal.compare_assets(ex, preset)
+    st.plotly_chart(bc.compare_bars([{"label": r["name"], "yours": r["yours"], "ref": r["target"]} for r in arows], mode), width="stretch", config=CHART_CFG)
+    reg, gro = bal.compare_region(ex, preset), bal.compare_growth(ex, preset)
+    c1, c2, c3 = st.columns(3)
+    with c1.container(border=True):
+        st.metric("Stocks", f"{ex['stocks']:.0f}%", f"{arows[0]['status']} · reference {arows[0]['target']:.0f}%", delta_color="off")
+    with c2.container(border=True):
+        st.metric("Outside the US", f"{reg['yours']:.0f}%" if reg else "n/a", f"{reg['status']} · reference {reg['target']:.0f}%" if reg else None, delta_color="off",
+                  help="Share of your stock money in companies outside the US.")
+    with c3.container(border=True):
+        st.metric("Growth tilt", f"{gro['yours']:.0f}%" if gro else "n/a",
+                  f"{gro['status']} · reference {gro['low']:.0f}–{gro['high']:.0f}%" if gro else None, delta_color="off",
+                  help="Share of stock money in technology, communication and consumer discretionary. The S&P 500 is about 54%.")
+    if ex["unclassified_pct"] >= bal.UNCLASSIFIED_NOTE:
+        st.caption(f"{ex['unclassified_pct']:.0f}% of the portfolio couldn't be classified, so these shares are of what could be.")
+
+with t_sectors:
+    if not ex["sectors"]:
+        st.info("No sector data for your holdings yet. Add a Finnhub key for single stocks; funds come from a built-in table.")
+    else:
+        srows = bal.compare_sectors(ex)
+        order = {s: i for i, s in enumerate(bd.SECTORS)}
+        st.plotly_chart(bc.compare_bars([{"label": r["sector"], "yours": r["yours"], "ref": r["market"]} for r in sorted(srows, key=lambda r: order[r["sector"]])],
+                                        mode, ref_label="S&P 500", height=640), width="stretch", config=CHART_CFG)
+        st.dataframe(pd.DataFrame([{"Sector": r["sector"], "You": r["yours"], "S&P 500": r["market"], "Gap (points)": r["diff"], "Read": r["status"],
+                                    "Mostly from": ", ".join(f"{s} {p:.0f}%" for s, p in r["from"] if p >= 15)} for r in srows]),
+                     hide_index=True, width="stretch", column_config={
+                         "You": st.column_config.NumberColumn(format="%.1f%%"), "S&P 500": st.column_config.NumberColumn(format="%.1f%%"),
+                         "Gap (points)": st.column_config.NumberColumn(format="%+.1f")})
+        st.caption(f"Share of your stock money that could be placed ({(ex['coverage'] or 0) * 100:.0f}% of it). Funds are split with a built-in table, "
+                   f"approximate as of {bd.AS_OF}; the S&P 500 weights are about the same date. Both drift over time.")
+
+with t_ideas:
+    notes = bal.suggestions(ex, preset, pick)
+    if not notes:
+        st.success("Nothing stands out against this reference mix.")
+    for n in notes:
+        st.markdown(f"- {ui.esc(n['text'])}")
+    st.caption("These point at areas to read about, not at a specific stock or fund to buy. Reference mixes are generic; your goals, timeline and taxes matter more.")
+    with st.expander("How this is worked out"):
+        st.dataframe(pd.DataFrame(bal.how_it_works(), columns=["Step", "Rule"]), hide_index=True, width="stretch")
 
 # ---------- Gains ----------
 gains = hl.gain_rows(merged)
