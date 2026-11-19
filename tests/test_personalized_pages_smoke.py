@@ -227,8 +227,8 @@ def test_entry_point_gives_pages_professional_names(monkeypatch):
     monkeypatch.setitem(sys.modules, "streamlit", st)
     runpy.run_path(str(ROOT / "app.py"), run_name="__main__")
     pages = st.navigation.call_args.args[0]
-    assert [k["title"] for _, k in pages] == ["Investing Dashboard", "Daily Brief", "Holdings", "Strategy Lab", "Dividends"]
-    assert [p for p, _ in pages] == ["dashboard.py", "pages/1_Daily_Brief.py", "pages/2_Holdings.py", "pages/3_Strategy_Lab.py", "pages/4_Dividends.py"]
+    assert [k["title"] for _, k in pages] == ["Investing Dashboard", "Daily Brief", "Holdings", "Strategy Lab", "Dividends", "Risk"]
+    assert [p for p, _ in pages] == ["dashboard.py", "pages/1_Daily_Brief.py", "pages/2_Holdings.py", "pages/3_Strategy_Lab.py", "pages/4_Dividends.py", "pages/5_Risk.py"]
     assert sum(1 for _, k in pages if k.get("default")) == 1
     for p, _ in pages:
         assert (ROOT / p).exists()                       # a typo here would break the whole app

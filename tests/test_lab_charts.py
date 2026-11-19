@@ -53,7 +53,7 @@ def install_stub_if_needed():
 
     go = types.ModuleType("plotly.graph_objects")
     go.Figure = Fig
-    for name in ("Bar", "Pie", "Scatter", "Histogram"):
+    for name in ("Bar", "Pie", "Scatter", "Histogram", "Heatmap"):
         setattr(go, name, lambda **k: k)
     pkg = types.ModuleType("plotly")
     pkg.graph_objects = go

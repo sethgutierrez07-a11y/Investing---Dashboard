@@ -15,6 +15,7 @@ import time
 import pandas as pd
 import streamlit as st
 
+import dividend_data as dd
 import holdings_lib as hl
 
 MAX_TICKERS = 15  # Finnhub free tier allows ~60 calls/minute
@@ -57,6 +58,12 @@ def unlock_sidebar() -> None:
 def load_raw():
     client = hl.make_client(secret("SNAPTRADE_CLIENT_ID"), secret("SNAPTRADE_CONSUMER_KEY"))
     return hl.fetch_all(client)
+
+
+@st.cache_data(ttl=43200, show_spinner=False)
+def load_history(symbol: str) -> dict:
+    """Yahoo price + dividend history for one ticker, cached 12h and shared by the Dividends and Risk pages."""
+    return dd.fetch_history(symbol)
 
 
 def get_portfolio():
