@@ -180,7 +180,7 @@ def account_label(account: dict) -> str:
     return f"{inst} · {name}".strip(" ·")
 
 
-def normalize_positions(account: dict, raw_positions: list[dict]) -> list[dict]:
+def normalize_positions(account: dict, raw_positions: list[dict], fallback_avg: dict[str, float] | None = None) -> list[dict]:
     label = account_label(account)
     rows = []
     for p in as_list(raw_positions, ("positions",)):
@@ -202,6 +202,8 @@ def normalize_positions(account: dict, raw_positions: list[dict]) -> list[dict]:
             units = num(p.get("fractional_units"))
         price = num(p.get("price"))
         avg = num(p.get("average_purchase_price"))
+        if not avg and fallback_avg:
+            avg = fallback_avg.get(str(ticker).upper())
         if not units:
             continue
         mv = units * price if price is not None else None
@@ -220,6 +222,23 @@ def normalize_positions(account: dict, raw_positions: list[dict]) -> list[dict]:
             }
         )
     return rows
+
+
+def avg_price_map(alt_positions: Any) -> dict[str, float]:
+    """Ticker -> average purchase price, from a second SnapTrade endpoint (read-only)."""
+    out: dict[str, float] = {}
+    for p in as_list(alt_positions, ("positions",)):
+        if not isinstance(p, dict):
+            continue
+        if "units" not in p and isinstance(p.get("position"), dict):
+            p = p["position"]
+        sym = p.get("symbol")
+        scope = sym if isinstance(sym, dict) else p
+        ticker = sym if isinstance(sym, str) else (find_str(scope, ("symbol", "raw_symbol", "ticker")) or None)
+        avg = num(p.get("average_purchase_price"))
+        if ticker and avg:
+            out[str(ticker).upper()] = avg
+    return out
 
 
 def cash_from_balances(raw_balances: list[dict]) -> dict[str, float]:
@@ -254,7 +273,7 @@ def build_portfolio(per_account: list[dict]) -> dict:
         if item.get("error"):
             warnings.append(f"{label}: couldn't load ({item['error']})")
             continue
-        acct_rows = normalize_positions(acct, item.get("positions"))
+        acct_rows = normalize_positions(acct, item.get("positions"), avg_price_map(item.get("alt_positions")))
         cash = cash_from_balances(item.get("balances"))
         non_usd = {k: v for k, v in cash.items() if k != "USD" and v}
         if non_usd:
@@ -385,6 +404,14 @@ def fetch_all(client: Any, on_error: Callable[[Exception], str] = lambda e: type
             }
         except Exception as e:  # noqa: BLE001 — report, don't crash the page
             item["error"] = on_error(e)
+        if not item["error"]:
+            # Second read-only source for cost data; failure here is harmless.
+            try:
+                h = unwrap(client.account_information.get_user_holdings(account_id=aid))
+                item["alt_positions"] = h.get("positions") if isinstance(h, dict) else None
+                item["shape"]["holdings_positions"] = describe_shape(item["alt_positions"])
+            except Exception:  # noqa: BLE001
+                item["alt_positions"] = None
         out.append(item)
     return out
 
@@ -499,3 +526,57 @@ def insights(summary: dict, conc: dict, mix: pd.DataFrame, merged: pd.DataFrame)
     if summary.get("gain_coverage", 1) < 0.9 and summary.get("gain") is not None:
         out.append("Cost basis is missing for part of your holdings, so total gain covers only the positions that have it.")
     return out
+
+
+# --------------------------------------------------------------------------
+# Personalization helpers (used by the Overview and Daily Brief pages)
+# --------------------------------------------------------------------------
+def shares_of_invested(merged: pd.DataFrame) -> dict[str, float]:
+    """Symbol -> % of the invested (non-cash) part of the portfolio."""
+    if merged.empty:
+        return {}
+    mv = merged.set_index("Symbol")["Market value"].dropna()
+    total = float(mv.sum())
+    return {s: float(v) / total * 100 for s, v in mv.items()} if total > 0 else {}
+
+
+def contributions(merged: pd.DataFrame, quotes: dict[str, dict | None]) -> pd.DataFrame:
+    """What each holding did to YOUR portfolio today.
+
+    Contribution (percentage points) = share of invested value x the stock's move.
+    The contributions add up to the portfolio's estimated move for the priced holdings.
+    """
+    cols = ["Symbol", "Share %", "Move %", "Contribution pp"]
+    shares = shares_of_invested(merged)
+    rows = []
+    for sym, share in shares.items():
+        q = quotes.get(sym)
+        dp = num(q.get("dp")) if q else None
+        if dp is None or not q.get("c"):
+            continue
+        rows.append({"Symbol": sym, "Share %": share, "Move %": dp})
+    if not rows:
+        return pd.DataFrame(columns=cols)
+    out = pd.DataFrame(rows)
+    priced_total = out["Share %"].sum()
+    out["Share %"] = out["Share %"] / priced_total * 100  # re-base to the priced part
+    out["Contribution pp"] = out["Share %"] * out["Move %"] / 100
+    out = out.reindex(out["Contribution pp"].abs().sort_values(ascending=False).index)
+    return out[cols].reset_index(drop=True)
+
+
+def cost_coverage(raw_items: list[dict]) -> dict:
+    """Counts only (never values): how many positions came with cost data."""
+    n = with_avg = with_pnl = with_lots = 0
+    for item in raw_items or []:
+        for p in as_list(item.get("positions"), ("positions",)):
+            if not isinstance(p, dict):
+                continue
+            n += 1
+            if num(p.get("average_purchase_price")):
+                with_avg += 1
+            if num(p.get("open_pnl")):
+                with_pnl += 1
+            if isinstance(p.get("tax_lots"), (list, tuple)) and p.get("tax_lots"):
+                with_lots += 1
+    return {"positions": n, "with_avg_price": with_avg, "with_open_pnl": with_pnl, "with_tax_lots": with_lots}

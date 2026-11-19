@@ -121,7 +121,7 @@ def run_page(monkeypatch, st, positions=POSITIONS, cash=250.0):
     stub_plotly_if_missing()
     monkeypatch.setitem(sys.modules, "streamlit", st)
     monkeypatch.setattr(hl, "make_client", lambda cid, key: FakeClient(positions, cash))
-    for m in ("holdings_charts", "brief_lib"):
+    for m in ("holdings_charts", "brief_lib", "portfolio_state"):
         sys.modules.pop(m, None)
     runpy.run_path(str(ROOT / "pages" / "2_Holdings.py"), run_name="__main__")
 
@@ -195,8 +195,8 @@ def test_page_shows_error_not_traceback_when_snaptrade_fails(monkeypatch):
         raise RuntimeError("nope")
 
     monkeypatch.setattr(hl, "make_client", boom)
-    sys.modules.pop("holdings_charts", None)
-    sys.modules.pop("brief_lib", None)
+    for m in ("holdings_charts", "brief_lib", "portfolio_state"):
+        sys.modules.pop(m, None)
     with pytest.raises(Stopped):
         runpy.run_path(str(ROOT / "pages" / "2_Holdings.py"), run_name="__main__")
     assert st.error.called and not st.dataframe.called

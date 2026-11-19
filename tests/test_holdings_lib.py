@@ -209,7 +209,9 @@ def test_fetch_all_only_uses_read_calls_and_isolates_errors():
     c = FakeClient(fail_on="a2")
     out = hl.fetch_all(c)
     assert [o["error"] for o in out] == [None, "TimeoutError"]
-    assert set(c.account_information.calls) <= {"list_user_accounts", "get_user_account_balance", "get_all_account_positions"}
+    assert set(c.account_information.calls) <= {
+        "list_user_accounts", "get_user_account_balance", "get_all_account_positions", "get_user_holdings"
+    }
     pf = hl.build_portfolio(out)
     assert len(pf["positions"]) == 1 and any("Roth" in w for w in pf["warnings"])
 
@@ -448,3 +450,54 @@ def test_summarize_excludes_cash_equivalents_from_holding_count():
     pf = hl.build_portfolio([item([real_pos("VOO", 1, 100.0, "et", "ETF"),
                                    real_pos("SPAXX", 100, 1.0, "oef", "Money Market", cash_eq=True)])])
     assert hl.summarize(pf["positions"], pf["cash"])["n_holdings"] == 1
+
+
+# ---- personalization helpers ----
+def test_shares_and_contributions_add_up_to_portfolio_move():
+    pf = hl.build_portfolio([item([real_pos("A", 10, 100.0), real_pos("B", 10, 300.0)])])  # 25% / 75%
+    merged = hl.by_symbol(pf["positions"])
+    assert hl.shares_of_invested(merged) == pytest.approx({"A": 25.0, "B": 75.0})
+    quotes = {"A": {"c": 100, "dp": 4.0}, "B": {"c": 300, "dp": -2.0}}
+    c = hl.contributions(merged, quotes)
+    by = dict(zip(c["Symbol"], c["Contribution pp"]))
+    assert by["A"] == pytest.approx(1.0) and by["B"] == pytest.approx(-1.5)
+    assert c.iloc[0]["Symbol"] == "B"  # biggest absolute impact first
+    # consistent with the headline number used on the Holdings page
+    assert c["Contribution pp"].sum() == pytest.approx(hl.day_change(pf["positions"], quotes)["pct"])
+
+
+def test_contributions_skip_unpriced_and_rebase():
+    pf = hl.build_portfolio([item([real_pos("A", 10, 100.0), real_pos("B", 10, 100.0)])])
+    merged = hl.by_symbol(pf["positions"])
+    c = hl.contributions(merged, {"A": {"c": 100, "dp": 2.0}, "B": None})
+    assert list(c["Symbol"]) == ["A"] and c.iloc[0]["Share %"] == pytest.approx(100)
+    assert hl.contributions(merged, {}).empty and hl.contributions(pd.DataFrame(), {}).empty
+
+
+def test_cost_coverage_counts_only():
+    a = real_pos("A", 1, 10.0)                        # has avg price (0.8 * price)
+    b = real_pos("B", 1, 10.0); b["average_purchase_price"] = None
+    c = real_pos("C", 1, 10.0); c["average_purchase_price"] = 0; c["open_pnl"] = 5.0
+    c["tax_lots"] = [{"x": 1}]
+    cov = hl.cost_coverage([{"positions": [a, b, c, "junk"]}])
+    assert cov == {"positions": 3, "with_avg_price": 1, "with_open_pnl": 1, "with_tax_lots": 1}
+    assert hl.cost_coverage([])["positions"] == 0
+
+
+def test_avg_price_fallback_from_holdings_endpoint():
+    a = real_pos("A", 10, 100.0); a["average_purchase_price"] = None   # primary endpoint lacks cost
+    alt = real_pos("A", 10, 100.0); alt["average_purchase_price"] = 80.0
+    pf = hl.build_portfolio([{**item([a]), "alt_positions": [alt]}])
+    row = pf["positions"].iloc[0]
+    assert row["Cost basis"] == pytest.approx(800) and row["Gain"] == pytest.approx(200)
+    assert hl.avg_price_map(None) == {} and hl.avg_price_map(["junk"]) == {}
+
+
+def test_holdings_endpoint_failure_is_harmless():
+    class NoHoldings(FakeAccountInfo):
+        def get_user_holdings(self, account_id):
+            raise RuntimeError("nope")
+
+    c = FakeClient(); c.account_information = NoHoldings()
+    out = hl.fetch_all(c)
+    assert all(o["error"] is None and o["alt_positions"] is None for o in out)
