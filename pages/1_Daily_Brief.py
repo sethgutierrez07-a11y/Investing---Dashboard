@@ -119,7 +119,7 @@ else:
 st.dataframe(
     movers,
     hide_index=True,
-    use_container_width=True,
+    width="stretch",
     column_config={
         "Price": st.column_config.NumberColumn(format="$%.2f"),
         "Change %": st.column_config.NumberColumn(format="%+.2f%%"),
@@ -134,7 +134,7 @@ try:
     if earnings.empty:
         st.info(f"No earnings reports for your tickers in the next {earnings_days} days.")
     else:
-        st.dataframe(earnings, hide_index=True, use_container_width=True)
+        st.dataframe(earnings, hide_index=True, width="stretch")
 except Exception as e:
     earnings = pd.DataFrame()
     st.warning(f"Couldn't load the earnings calendar: {e}")
@@ -159,7 +159,7 @@ rows = [
     if v
 ]
 if rows:
-    st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+    st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
     st.caption(
         "Score runs from -2 (all Strong Sell) to +2 (all Strong Buy), comparing the "
         "latest monthly analyst snapshot with the prior one. Analyst ratings skew "
@@ -218,7 +218,7 @@ else:
                 st.dataframe(
                     pd.DataFrame(fl),
                     hide_index=True,
-                    use_container_width=True,
+                    width="stretch",
                     column_config={"Link": st.column_config.LinkColumn("Link", display_text="open")},
                 )
     except Exception as e:

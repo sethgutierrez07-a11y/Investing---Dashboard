@@ -145,7 +145,7 @@ top = merged.head(12)
 fig = go.Figure(go.Bar(x=top["Weight %"][::-1], y=top["Symbol"][::-1], orientation="h",
                        text=[f"{w:.1f}%" for w in top["Weight %"][::-1]], textposition="outside"))
 fig.update_layout(height=max(260, 28 * len(top)), margin=dict(l=10, r=40, t=10, b=10), xaxis_title="% of total portfolio")
-left.plotly_chart(fig, use_container_width=True)
+left.plotly_chart(fig, width="stretch")
 
 with right:
     st.markdown("**Concentration**")
@@ -172,5 +172,5 @@ if not hide:
     for c in ("Market value", "Cost basis"):
         fmt[c] = st.column_config.NumberColumn(format="$%.0f")
     fmt["Gain"] = st.column_config.NumberColumn(format="%+.0f")
-st.dataframe(show, hide_index=True, use_container_width=True, column_config=fmt)
+st.dataframe(show, hide_index=True, width="stretch", column_config=fmt)
 st.caption("Gain uses SnapTrade's average purchase price. Cost basis can be incomplete for transferred or reinvested shares.")
