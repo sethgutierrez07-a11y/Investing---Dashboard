@@ -6,6 +6,7 @@ Returns [(section title, [bullets])]. Bullets may contain **bold** and "$" (the 
 from __future__ import annotations
 
 import deep_lib as dlib
+import hold_lib as hl
 
 
 def pc(x: float | None, digits: int = 1, signed: bool = False) -> str:
@@ -140,6 +141,50 @@ def fund_summary(symbol: str, quote: dict | None, stats: dict | None, kind: str 
             out.append("Returns with dividends reinvested: " + ", ".join(bits) + ".")
         if stats.get("max_drawdown") is not None:
             out.append(f"Its worst fall from a peak in the past five years was {pc(abs(stats['max_drawdown']), 0)}.")
+    return out
+
+
+def _length(days: int) -> str:
+    months = round(days / 30.4)
+    return f"{months} months" if months < 24 else f"{days / 365.25:.1f} years"
+
+
+def holding_summary(symbol: str, h: dict | None, windows: list[dict] | None, recov: dict | None,
+                    div: dict | None = None, held: dict | None = None, fund: bool = False) -> list[str]:
+    """Plain-words bullets for the "How long to hold it" section. Percent-only for holdings."""
+    if not h:
+        return ["There isn't enough price history to say how long this has needed to be held. Newer companies and funds have a short record."]
+    out = [f"**Planning window: {h['text']}** ({h['style'].lower()}). Think of it as money you won't need for at least {h['low']} years. "
+           "It is not a prediction, and not a date to sell."]
+    out.append(f"**Why:** {symbol} has been {h['tier']}" + (" (as a fund)" if fund else "") + ". " + "; ".join(h["why"]).capitalize() + ".")
+    ws = windows or []
+    if ws:
+        bits = ", ".join(f"{w['years']} year{'s' if w['years'] > 1 else ''}: {w['share_gain'] * 100:.0f}%" for w in ws)
+        out.append(f"**History:** how often holding it for a stretch ended in a gain (dividends included): {bits}.")
+        long = ws[-1]
+        out.append(f"The worst {long['years']}-year stretch ended {pc(long['worst_total'], 0, True)} overall; the typical one {pc(long['median_total'], 0, True)}. "
+                   "The stretches overlap and come from one period, so treat them as a feel for the range.")
+    else:
+        out.append("**History:** not enough price history to test 1, 3 or 5-year holding periods yet.")
+    eps = (recov or {}).get("episodes") or []
+    if eps:
+        e = eps[0]
+        if e["recovered"] is not None:
+            out.append(f"**Recovery:** its deepest fall ({pc(e['depth'], 0)}, from {e['peak']:%b %Y}) took about {_length(e['total_days'])} to get back to the old high.")
+        else:
+            out.append(f"**Recovery:** its deepest fall ({pc(e['depth'], 0)}, from {e['peak']:%b %Y}) has not been fully recovered yet. Waiting is not guaranteed to work.")
+    elif recov and recov.get("longest_days") is None:
+        out.append("**Recovery:** no fall deeper than 15% in the past ten years (or the record is too short to say).")
+    if h.get("small_slice"):
+        line = f"**Size:** because it swings this much, many people keep a single stock like this to about {hl.SIZE_NOTE_PCT}% of invested money, so one bad stretch doesn't decide the whole portfolio."
+        if held and held.get("held") and held.get("weight") is not None and held["weight"] > hl.SIZE_NOTE_PCT:
+            line += f" You hold {held['weight']:.0f}% of invested money in it."
+        out.append(line)
+    if not fund and div and div.get("active") and (div.get("streak") or 0) >= 5:
+        out.append(f"**While you wait:** it has raised its dividend {div['streak']} years in a row, which pays you along the way (it can still be cut).")
+    elif not fund and div is not None and not div.get("active"):
+        out.append("**While you wait:** it pays no regular dividend, so the whole return depends on the price.")
+    out.append("**Long is not forever:** a long hold only works while the business stays healthy. The list below says what to re-check.")
     return out
 
 
