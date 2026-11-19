@@ -66,3 +66,16 @@ def hold_chart(windows: list[dict], mode: str = "dark", height: int = 240) -> go
     fig.update_xaxes(showgrid=False, tickfont=dict(color=t["text2"]))
     fig.update_yaxes(range=[0, 115], showgrid=True, gridcolor=t["grid"], zeroline=False, ticksuffix="%", tickfont=dict(color=t["muted"]))
     return fig
+
+
+def score_bars(areas: list[dict], mode: str = "dark", height: int | None = None) -> go.Figure:
+    """One bar per scorecard area (0-100), best at the top, every bar labelled."""
+    t, c = TOKENS[mode], SERIES[mode]
+    rows = list(areas)[::-1]
+    fig = go.Figure(go.Bar(y=[r["name"] for r in rows], x=[r["score"] for r in rows], orientation="h", marker_color=c["a"],
+                           text=[f"{r['score']:.0f}" for r in rows], textposition="outside", cliponaxis=False,
+                           customdata=[r["n"] for r in rows], hovertemplate="%{y}: %{x:.0f} of 100 (%{customdata} measures)<extra></extra>"))
+    fig.update_layout(**_layout(mode, height or max(150, 52 * len(rows) + 40), showlegend=False, margin=dict(l=4, r=40, t=8, b=8), bargap=0.4))
+    fig.update_xaxes(range=[0, 108], showgrid=False, showticklabels=False)
+    fig.update_yaxes(showgrid=False, tickfont=dict(color=t["text2"]))
+    return fig

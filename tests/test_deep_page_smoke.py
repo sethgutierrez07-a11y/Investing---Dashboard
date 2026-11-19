@@ -98,6 +98,11 @@ def text(st):
     return sp.text_of(st) + " " + md(st)
 
 
+def ticker_select(st):
+    """The 'Or pick one' dropdown (the page also has selectboxes for the fit rules)."""
+    return next(c for c in st.selectbox.call_args_list if c.kwargs.get("key") == "deep_pick")
+
+
 def heads(st):
     return [c.args[0] for c in st.header.call_args_list]
 
@@ -109,15 +114,15 @@ def test_company_page_renders_summary_tabs_and_charts(monkeypatch):
     assert heads(st) == ["AAPL Inc (AAPL)"] and snap == []                         # locked: never touched the brokerage
     t = md(st)
     assert "What looks good" in t and "What to watch" in t and "Bottom line" in t
-    assert [c.args[0] for c in st.tabs.call_args_list][-1] == ["📊 Key numbers", "📈 Price, risk & dividends", "⏳ How long to hold", "🧑‍🏫 Analysts & news", "🧮 How it's scored"]
+    assert [c.args[0] for c in st.tabs.call_args_list][-1] == ["📊 Key numbers", "🏅 Scorecard", "🎯 Fit for you", "📈 Price, risk & dividends", "⏳ How long to hold", "🧑‍🏫 Analysts & news", "🧮 How it's scored"]
     assert "Analyst consensus" in t and "Recent headlines" in t and "Next earnings report" in t
 
 
 def test_chart_set_is_price_growth_falls_and_analysts(monkeypatch):
     st = make_st(typed="AAPL")
     run(monkeypatch, st)
-    # price chart, growth-vs-S&P, falls-from-peak, holding-period bars, analyst bars = 5 charts
-    assert st.plotly_chart.call_count == 5
+    # scorecard bars, price chart, growth-vs-S&P, falls-from-peak, holding-period bars, analyst bars = 6 charts
+    assert st.plotly_chart.call_count == 6
 
 
 def all_frames(st):
@@ -166,6 +171,68 @@ def test_how_long_to_hold_works_for_funds_and_with_short_history(monkeypatch):
     assert "isn't enough price history to say" in md(st3)
 
 
+def metric_calls(st, name):
+    return [c for c in st.metric.call_args_list if c.args and c.args[0] == name]
+
+
+def test_scorecard_and_fit_tiles_sit_under_the_header_tiles(monkeypatch):
+    st = make_st(typed="AAPL")
+    run(monkeypatch, st)
+    sc, fit = metric_calls(st, "Scorecard")[0], metric_calls(st, "Fit for you")[0]
+    assert sc.args[1].endswith(" / 100") and sc.args[2] in ("Strong", "Solid", "Mixed", "Weak")
+    assert fit.args[1] in ("Fits your rules", "Mostly fits", "Partly fits", "Doesn't fit") and " of " in fit.args[2] and "$" not in str(fit)
+    t = md(st)
+    assert "Scorecard: " in t and "out of 100" in t and "How this stock matches" in t
+    frames = all_frames(st)
+    area = next(f for f in frames if list(f.columns) == ["Area", "Score", "Measures", "What it asks"])
+    assert list(area["Area"]) == ["Value", "Growth", "Profit", "Safety", "Price & trend"]
+    fit = next(f for f in frames if list(f.columns) == ["Your rule", "What you set", "This stock", "Result"])
+    assert set(fit["Result"]) <= {"✅ Meets", "❌ Misses", "❔ Can't tell"} and len(fit) == 5            # locked: no account rule
+
+
+def test_fit_widgets_start_at_the_defaults_and_the_account_rule_needs_an_unlock(monkeypatch):
+    import fit_lib
+    st = make_st(typed="AAPL")
+    run(monkeypatch, st)
+    assert {k: st.session_state[sk] for k, sk in fit_lib.KEYS.items()} == fit_lib.DEFAULTS
+    keys = [c.kwargs.get("key") for name in ("slider", "select_slider", "selectbox", "radio", "checkbox") for c in getattr(st, name).call_args_list]
+    assert "fit_years" in keys and "fit_pe" in keys and "fit_profit" in keys and "fit_max_share" not in keys
+    st2 = make_st(unlocked=True, typed="AAPL")
+    run(monkeypatch, st2)
+    keys2 = [c.kwargs.get("key") for c in st2.slider.call_args_list]
+    assert "fit_max_share" in keys2
+    fit = next(f for f in all_frames(st2) if list(f.columns) == ["Your rule", "What you set", "This stock", "Result"])
+    assert len(fit) == 6 and "Most I'd put in one stock" in set(fit["Your rule"]) and "$" not in fit.to_string()
+
+
+def test_changing_a_rule_changes_the_verdict(monkeypatch):
+    base = make_st(typed="AAPL")
+    run(monkeypatch, base)
+    strict = make_st(typed="AAPL", state={"fit_swings": "Small (under 20% a year)", "fit_pe": 15, "fit_years": 1, "fit_profit": True})
+    run(monkeypatch, strict)
+    a, b = metric_calls(base, "Fit for you")[0].args, metric_calls(strict, "Fit for you")[0].args
+    assert a[1] != b[1] or a[2] != b[2]
+    assert "Doesn't meet" in md(strict)
+
+
+def test_funds_are_not_scored_but_the_fit_check_still_runs(monkeypatch):
+    st = make_st(typed="VOO")
+    run(monkeypatch, st, http=Fh(fund={"VOO"}))
+    sc = metric_calls(st, "Scorecard")[0]
+    assert sc.args[1] == "n/a" and sc.args[2] == "funds aren't scored"
+    assert "Funds and ETFs aren't scored" in md(st)
+    fit = metric_calls(st, "Fit for you")[0]
+    assert fit.args[1] != "n/a"                                                                      # swings, falls and time still check
+
+
+def test_scorecard_says_not_enough_data_when_only_price_history_is_available(monkeypatch):
+    st = make_st(typed="AAPL")
+    run(monkeypatch, st, http=Fh(fail=[("*", "metric")]))
+    sc = metric_calls(st, "Scorecard")[0]
+    assert sc.args[1] == "n/a" and sc.args[2] == "not enough data"
+    assert "at least three of the five areas" in md(st)
+
+
 def test_key_numbers_are_grouped_with_read_labels(monkeypatch):
     st = make_st(typed="AAPL")
     run(monkeypatch, st)
@@ -185,7 +252,7 @@ def test_default_ticker_is_todays_stock_idea_shared_with_the_dashboard(monkeypat
     dash, _, _ = sp.run(monkeypatch, "dashboard.py", unlocked=False, ideas=True)
     picks = [str(c.args[0]) for c in dash.markdown.call_args_list if c.args and str(c.args[0]).startswith("### ")]
     assert picks and picks[0].split()[1] == sym
-    assert any("today's stock idea" in o for o in st.selectbox.call_args.args[1])
+    assert any("today's stock idea" in o for o in ticker_select(st).args[1])
     assert "Stock of the day" in " ".join(str(c) for c in st.markdown.call_args_list)
 
 
@@ -208,9 +275,9 @@ def test_jump_from_another_page_sets_the_ticker_and_clears_the_inbox(monkeypatch
 def test_quick_pick_dropdown_sets_the_ticker_and_resets_itself(monkeypatch):
     st = make_st(unlocked=True, typed="AAPL")
     run(monkeypatch, st)
-    opts = st.selectbox.call_args.args[1]
+    opts = ticker_select(st).args[1]
     assert opts[0] == "Type a ticker" and any(o.startswith("VOO · you hold") for o in opts)
-    cb = st.selectbox.call_args.kwargs["on_change"]
+    cb = ticker_select(st).kwargs["on_change"]
     st.session_state["deep_pick"] = "MSFT · you hold this"
     cb()
     assert st.session_state["deep_typed"] == "MSFT" and st.session_state["deep_pick"] == "Type a ticker"
