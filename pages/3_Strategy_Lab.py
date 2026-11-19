@@ -13,6 +13,7 @@ import streamlit as st
 
 import lab_charts as lc
 import lab_lib as lab
+import lab_text as lt
 import price_data as pdx
 
 st.set_page_config(page_title="Strategy Lab", layout="wide")
@@ -114,10 +115,15 @@ if "split-adjusted" in source:
     st.warning("This source leaves out dividends, so every result (including buy-and-hold) is understated for dividend payers.")
 
 # ---------- Results on the training period ----------
-st.subheader("How it did on the training period")
 if m_train_s is None or m_train_b is None:
     st.warning("Not enough history in the training window. Use a longer history or a larger training share.")
     st.stop()
+
+# The written summary goes first on the page but needs every number below, so it is filled in at the end.
+st.subheader("Summary")
+summary_box = st.container()
+st.divider()
+st.subheader("How it did on the training period")
 
 k1, k2, k3 = st.columns(3)
 k1.metric("Yearly return", lab.metrics_table({"s": m_train_s}).loc["Yearly return (CAGR)", "s"],
@@ -141,6 +147,7 @@ with st.expander("Side-by-side numbers and drawdowns"):
                     width="stretch", config=CHART_CFG)
 
 # ---------- Is it luck? ----------
+luck_res, luck_text, overfit = None, "", None
 st.subheader("Is it luck?")
 with st.container(border=True):
     if not strat.has_timing:
@@ -151,6 +158,7 @@ with st.container(border=True):
     else:
         res = lab.timing_luck_test(run.positions, lab.window_returns(prices.pct_change().fillna(0.0), end=split))
         level, text = lab.luck_verdict(res["p_value"], n_trials, res.get("reason"))
+        luck_res, luck_text = res, text
         if res["p_value"] is not None:
             st.plotly_chart(lc.luck_chart(res["sims"], res["observed"], mode), width="stretch", config=CHART_CFG)
             st.caption(
@@ -193,8 +201,8 @@ with st.container(border=True):
             both = lab.metrics_table({f"{run.name} (training)": m_train_s, f"{bench.name} (training)": m_train_b,
                                       f"{run.name} (held out)": m_test_s, f"{bench.name} (held out)": m_test_b})
             st.dataframe(both, width="stretch")
-            level, text = lab.overfit_note(m_train_s, m_train_b, m_test_s, m_test_b)
-            {"good": st.success, "warn": st.warning, "neutral": st.info}[level](text)
+            overfit = lab.overfit_note(m_train_s, m_train_b, m_test_s, m_test_b)
+            {"good": st.success, "warn": st.warning, "neutral": st.info}[overfit[0]](overfit[1])
 
 # ---------- Learn ----------
 with st.expander("How to read this (and what the lab can't tell you)"):
@@ -209,3 +217,22 @@ with st.expander("How to read this (and what the lab can't tell you)"):
 - **Limits:** one ticker, one history, daily prices. Markets change, and a rule that worked in this period may not work in the next.
 """
     )
+
+
+# ---------- Written summary (fills the placeholder near the top) ----------
+free = lab.run_strategy(key, prices, params, 0)
+m_free = lab.metrics(lab.window_returns(free.returns, end=split), free.positions)
+sections = lt.write_summary(
+    symbol=symbol, key=key, label=strat.label, params=params, cost_bps=cost_bps, source=source,
+    start=prices.index[0], end=prices.index[-1], split=split, train_pct=train_pct, benchmark_name=bench.name,
+    ms=m_train_s, mb=m_train_b, cagr_no_cost=m_free["cagr"] if m_free else None, luck=luck_res, luck_text=luck_text,
+    n_trials=n_trials, has_timing=strat.has_timing, revealed=revealed and overfit is not None,
+    overfit=overfit, ms_test=m_test_s, mb_test=m_test_b,
+)
+with summary_box:
+    tabs = st.tabs([title for title, _ in sections])
+    for tab, (_, bullets) in zip(tabs, sections):
+        with tab:
+            for b in bullets:
+                st.markdown(f"- {b}")
+    st.caption("Written by rules from the numbers on this page, with no AI. It describes this ticker, rule and period only.")

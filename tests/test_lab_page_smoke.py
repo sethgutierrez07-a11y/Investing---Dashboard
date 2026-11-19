@@ -35,6 +35,7 @@ def make_st(strategy="trend", press=(), session=None):
     st.file_uploader.return_value = None
     st.button.side_effect = lambda label, **k: label in press
     st.columns.side_effect = lambda spec, **k: [MagicMock() for _ in range(spec if isinstance(spec, int) else len(spec))]
+    st.tabs.side_effect = lambda labels: [MagicMock() for _ in labels]
     st.stop.side_effect = Stopped
     st.context.theme.type = "dark"
     return st
@@ -124,3 +125,26 @@ def test_too_little_history_in_training_window_stops_cleanly(monkeypatch):
     # 300 days of data, 70% train = 210 days, but the 200-day average needs a warm-up; still >30 return days, so it runs
     run(monkeypatch, st, load=lambda s, k: (prices(300), "Yahoo", []))
     assert st.dataframe.called or st.plotly_chart.called
+
+
+def tab_titles(st):
+    return [c.args[0] for c in st.tabs.call_args_list]
+
+
+def test_summary_tabs_appear_for_trend_and_describe_this_ticker(monkeypatch):
+    st = make_st("trend")
+    run(monkeypatch, st)
+    assert tab_titles(st) == [["The setup", "What happened", "Costs & activity", "Is it luck?", "Takeaway"]]
+    t = text(st)
+    assert "above its 200-day average" in t and "SPY" in t and "no AI" in t
+    heads = [c.args[0] for c in st.subheader.call_args_list]
+    assert heads.index("Summary") < heads.index("How it did on the training period")
+
+
+def test_summary_gains_held_out_tab_once_revealed_and_handles_dca(monkeypatch):
+    st = make_st("trend", session={"lab_revealed": {"SPY"}})
+    run(monkeypatch, st)
+    assert "Held-out test" in tab_titles(st)[0]
+    st2 = make_st("dca")
+    run(monkeypatch, st2)
+    assert "money waiting to be invested" in text(st2)
