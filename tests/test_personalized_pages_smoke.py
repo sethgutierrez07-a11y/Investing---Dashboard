@@ -66,7 +66,7 @@ def make_streamlit(unlocked, extras=""):
     return st
 
 
-def run(monkeypatch, path, unlocked, extras=""):
+def run(monkeypatch, path, unlocked, extras="", positions=POSITIONS):
     stub_plotly_if_missing()
     st = make_streamlit(unlocked, extras)
     http = Http()
@@ -74,7 +74,7 @@ def run(monkeypatch, path, unlocked, extras=""):
 
     def client(cid, key):
         snap_calls.append(1)
-        return FakeClient(POSITIONS)
+        return FakeClient(positions)
 
     monkeypatch.setitem(sys.modules, "streamlit", st)
     monkeypatch.setattr(hl, "make_client", client)
@@ -141,4 +141,16 @@ def test_wrong_snaptrade_failure_still_renders_sample(monkeypatch):
         sys.modules.pop(m, None)
     st.text_area.return_value = "AAPL"
     runpy.run_path(str(ROOT / "app.py"), run_name="__main__")  # must not raise
+    assert st.dataframe.called
+
+
+@pytest.mark.parametrize("page", ["app.py", "pages/1_Daily_Brief.py"])
+@pytest.mark.parametrize("missing", ["all", "some"])
+def test_unlocked_with_missing_cost_basis_does_not_crash(monkeypatch, page, missing):
+    from test_holdings_page_smoke import rp
+    pos = [dict(p) for p in POSITIONS]
+    for i, p in enumerate(pos):
+        if missing == "all" or i == 1:
+            p["average_purchase_price"] = None
+    st, http, _ = run(monkeypatch, page, unlocked=True, positions=pos)
     assert st.dataframe.called
