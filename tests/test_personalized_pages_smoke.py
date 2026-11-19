@@ -97,7 +97,7 @@ def run(monkeypatch, path, unlocked, extras="", positions=POSITIONS, ideas=False
 
 
 def queried_symbols(http, endpoint="/quote"):
-    return [p["symbol"] for u, p in http.urls if u.endswith(endpoint)]
+    return [p["symbol"] for u, p in http.urls if u.endswith(endpoint) and p["symbol"] != "SPY"]  # SPY is only the benchmark
 
 
 def text_of(st):
@@ -202,3 +202,12 @@ def test_analyst_section_splits_stocks_and_funds_locked_sample_list(monkeypatch)
     assert tab_labels(st) == [["AAPL", "MSFT"]]         # VOO has no company profile -> treated as a fund
     assert "ETFs & funds" in markdown_text(st)
     assert [p["symbol"] for u, p in http.urls if u.endswith("/stock/recommendation")] == ["AAPL", "MSFT"]
+
+
+def test_brief_writes_free_rule_based_summary_locked_and_unlocked(monkeypatch):
+    st, http, _ = run(monkeypatch, "pages/1_Daily_Brief.py", unlocked=True)
+    text = markdown_text(st)
+    assert "Bottom line" in text and "S&P 500" in text and "no AI" in text_of(st)
+    assert any(p["symbol"] == "SPY" for u, p in http.urls if u.endswith("/quote"))
+    st2, _, _ = run(monkeypatch, "pages/1_Daily_Brief.py", unlocked=False)
+    assert "Bottom line" in markdown_text(st2) and "simple average" in markdown_text(st2)
