@@ -39,6 +39,9 @@ def install_stub_if_needed():
         def add_vline(self, **k):
             self.shapes.append(k)
 
+        def add_hline(self, **k):
+            self.shapes.append(k)
+
         def update_layout(self, **k):
             self.layout.update(k)
 

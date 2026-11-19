@@ -14,6 +14,8 @@ pages = [
     st.Page("pages/3_Strategy_Lab.py", title="Strategy Lab", icon="🧪", url_path="Strategy_Lab"),
     st.Page("pages/4_Dividends.py", title="Dividends", icon="💰", url_path="Dividends"),
     st.Page("pages/5_Risk.py", title="Risk", icon="🛡️", url_path="Risk"),
+    st.Page("pages/6_Market.py", title="Market", icon="🌐", url_path="Market"),
+    st.Page("pages/7_Learn.py", title="Learn", icon="🎓", url_path="Learn"),
 ]
 
 st.navigation(pages).run()

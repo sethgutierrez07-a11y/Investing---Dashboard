@@ -88,6 +88,8 @@ button[data-baseweb="tab"] {{ font-weight: 600; letter-spacing: .01em; }}
 ::-webkit-scrollbar-thumb {{ background: {p['hair']}; border-radius: 10px; border: 2px solid transparent; background-clip: content-box; }}
 .ix-eyebrow {{ display: flex; align-items: center; gap: .55rem; font-size: .72rem; font-weight: 700; letter-spacing: .22em; text-transform: uppercase; color: {p['accent']}; margin: 0 0 .35rem 0; }}
 .ix-dot {{ width: 8px; height: 8px; border-radius: 50%; background: {p['ok']}; animation: ix-pulse 2.4s ease-out infinite; }}
+.ix-label {{ font-size: .72rem; font-weight: 700; letter-spacing: .18em; text-transform: uppercase; color: {p['accent']}; margin: 0 0 .3rem 0; }}
+.ix-tip {{ font-size: 1.12rem; line-height: 1.6; margin: .1rem 0 .5rem 0; }}
 .ix-strip {{ display: flex; flex-wrap: wrap; gap: .5rem; margin: .2rem 0 1rem 0; }}
 .ix-chip {{ display: inline-flex; align-items: center; gap: .45rem; padding: .28rem .7rem; border-radius: 999px; font-size: .78rem; font-weight: 600; letter-spacing: .01em; border: 1px solid {p['card_border']}; background: {p['faint']}; white-space: nowrap; }}
 .ix-chip i {{ width: 7px; height: 7px; border-radius: 50%; display: inline-block; }}
@@ -107,6 +109,49 @@ def apply() -> None:
 
 
 # ---------------------------------------------------------------- small HTML pieces (home page)
+def esc(text: str) -> str:
+    """Escape $ so Streamlit's Markdown does not read "$10 ... $20" as a math formula."""
+    return (text or "").replace("$", "\\$")
+
+
+def today_central(now: dt.datetime | None = None) -> dt.date:
+    """Today's date in the owner's time zone (the server runs in UTC, which is a day ahead each evening)."""
+    try:
+        from zoneinfo import ZoneInfo
+        return (now or dt.datetime.now(dt.timezone.utc)).astimezone(ZoneInfo("America/Chicago")).date()
+    except Exception:
+        return (now or dt.datetime.now(dt.timezone.utc)).date()
+
+
+def label(text: str) -> None:
+    import streamlit as st
+    st.markdown(f'<div class="ix-label">{escape(text)}</div>', unsafe_allow_html=True)
+
+
+def tip_card(tip: dict, full: bool = False) -> None:
+    """A bordered card with one tip. `full` adds the 'read next' line for the Learn page."""
+    import streamlit as st
+    import learn_lib as ll
+    with st.container(border=True):
+        label(f"💡 Tip of the day · {tip['topic']}")
+        st.markdown(f'<div class="ix-tip">{escape(tip["text"])}</div>', unsafe_allow_html=True)
+        entry = ll.find_term(tip.get("term"))
+        if full and entry:
+            st.caption(esc(f"Read next in the glossary: {entry['term']}. {entry['short']}"))
+        if tip.get("app") and full:
+            names = {p: (title, icon) for p, title, icon, _ in NAV}
+            title, icon = names.get(tip["app"], ("this tab", "➡️"))
+            try:
+                st.page_link(tip["app"], label=f"See it in {title}", icon=icon)
+            except Exception:
+                pass
+        elif not full:
+            try:
+                st.page_link("pages/7_Learn.py", label="More tips and the glossary", icon="🎓")
+            except Exception:
+                pass
+
+
 def eyebrow(text: str) -> None:
     import streamlit as st
     st.markdown(f'<div class="ix-eyebrow"><span class="ix-dot"></span>{escape(text)}</div>', unsafe_allow_html=True)
@@ -167,17 +212,21 @@ NAV = [
     ("pages/3_Strategy_Lab.py", "Strategy Lab", "🧪", "Test a trading rule honestly against just holding."),
     ("pages/4_Dividends.py", "Dividends", "💰", "Income received, what's coming, and reinvesting."),
     ("pages/5_Risk.py", "Risk", "🛡️", "How bumpy your mix is and how it holds up in a fall."),
+    ("pages/6_Market.py", "Market", "🌐", "Indexes, sectors, rates and a calendar of what's coming."),
+    ("pages/7_Learn.py", "Learn", "🎓", "A plain-English glossary and a financial tip every day."),
 ]
 
 
-def nav_tiles() -> None:
-    """A row of shortcuts to the other pages. If linking fails for any reason the page still loads."""
+def nav_tiles(per_row: int = 4) -> None:
+    """Shortcuts to the other pages, a few per row. If linking fails for any reason the page still loads."""
     import streamlit as st
-    cols = st.columns(len(NAV))
-    for col, (path, title, icon, note) in zip(cols, NAV):
-        with col.container(border=True):
-            try:
-                st.page_link(path, label=title, icon=icon)
-            except Exception:
-                st.markdown(f"**{icon} {title}**")
-            st.markdown(f'<p class="ix-tile-note">{escape(note)}</p>', unsafe_allow_html=True)
+    for start in range(0, len(NAV), per_row):
+        chunk = NAV[start:start + per_row]
+        cols = st.columns(per_row)
+        for col, (path, title, icon, note) in zip(cols, chunk):
+            with col.container(border=True):
+                try:
+                    st.page_link(path, label=title, icon=icon)
+                except Exception:
+                    st.markdown(f"**{icon} {title}**")
+                st.markdown(f'<p class="ix-tile-note">{escape(note)}</p>', unsafe_allow_html=True)
