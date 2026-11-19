@@ -13,7 +13,10 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+import datetime as dt
+
 import holdings_lib as hl
+import idea_lib as il
 import portfolio_state as ps
 
 st.set_page_config(page_title="Investing Dashboard", layout="wide")
@@ -71,6 +74,17 @@ def fetch_price_target(symbol: str, api_key: str) -> dict:
     )
     r.raise_for_status()
     return r.json()
+
+
+@st.cache_data(ttl=12 * 3600)  # fundamentals change quarterly
+def fetch_metrics(symbol: str, api_key: str) -> dict:
+    r = requests.get(
+        f"{FINNHUB_BASE}/stock/metric",
+        params={"symbol": symbol, "metric": "all", "token": api_key},
+        timeout=10,
+    )
+    r.raise_for_status()
+    return (r.json() or {}).get("metric") or {}
 
 
 @st.cache_data(ttl=86400)
@@ -131,6 +145,146 @@ def render_portfolio_headline(portfolio, quotes):
         with c3.container(border=True):
             st.metric("Biggest drag", str(worst["Symbol"]), delta=f"{worst['Contribution pp']:+.2f} pp")
     st.write("")
+
+
+def render_analyst_section(df, portfolio, api_key):
+    """Analysts rate companies, not funds: stocks get analyst tabs, ETFs/funds get their own table."""
+    st.subheader("Analyst consensus & price targets")
+    class_by = dict(zip(portfolio["merged"]["Symbol"], portfolio["merged"]["Class"])) if portfolio else {}
+    names = dict(zip(df["Symbol"], df["Name"])) if "Name" in df else {}
+    stocks, funds = il.split_stocks_funds(list(df["Symbol"]), class_by, names)
+
+    st.markdown("**Stocks**")
+    if not stocks:
+        st.info("No individual stocks in this list. Add one in the sidebar to see analyst ratings.")
+    else:
+        tabs = st.tabs(stocks)
+        for tab, symbol in zip(tabs, stocks):
+            with tab:
+                render_stock_tab(symbol, api_key)
+
+    if funds:
+        st.markdown("**ETFs & funds**")
+        st.caption(
+            "Analysts rate individual companies, not funds, so there are no analyst ratings or price targets for these. "
+            "What matters for a fund is what it holds, what it costs and how big it is. Here is how yours are doing."
+        )
+        cols = ["Symbol", "Name", "Price", "Change %"] + [c for c in ("Weight %", "Impact (pp)", "Since purchase %") if c in df.columns]
+        fdf = df[df["Symbol"].isin(funds)][cols].reset_index(drop=True)
+        fdf["Type"] = [class_by.get(s, "ETF/fund") for s in fdf["Symbol"]]
+        st.dataframe(
+            fdf.style.format(
+                {"Price": "${:.2f}", "Change %": "{:+.2f}%", "Weight %": "{:.1f}%", "Impact (pp)": "{:+.2f}", "Since purchase %": "{:+.1f}%"},
+                na_rep="—",
+            ),
+            width="stretch", hide_index=True,
+        )
+
+
+def render_stock_tab(symbol, api_key):
+    col1, col2 = st.columns([2, 1])
+    try:
+        trend_data = fetch_recommendation_trend(symbol, api_key)
+    except Exception as e:
+        col1.warning(f"Couldn't load analyst data for {symbol}: {e}")
+        trend_data = []
+
+    if trend_data:
+        latest = trend_data[0]
+        col1.plotly_chart(render_consensus_bar(latest), width="stretch")
+        col1.caption(f"As of period ending {latest.get('period', 'unknown')}.")
+    else:
+        col1.info("No analyst recommendation data available for this ticker.")
+
+    if st.session_state.get("price_targets_blocked"):
+        col2.info("Price targets aren't included on the free Finnhub plan.")
+        return
+    try:
+        pt = fetch_price_target(symbol, api_key)
+        if pt and pt.get("targetMean"):
+            col2.metric("Mean price target", f"${pt['targetMean']:.2f}")
+            col2.metric("High / Low target", f"${pt['targetHigh']:.2f} / ${pt['targetLow']:.2f}")
+            col2.caption(f"Based on {pt.get('lastUpdated', 'recent')} data.")
+        else:
+            col2.info("No price target data available.")
+    except requests.exceptions.HTTPError as e:
+        if e.response is not None and e.response.status_code == 403:
+            st.session_state["price_targets_blocked"] = True  # skip the rest: saves API calls
+            col2.info("Price targets aren't included on the free Finnhub plan.")
+        else:
+            col2.warning(f"Couldn't load price target: {e}")
+    except Exception as e:
+        col2.warning(f"Couldn't load price target: {e}")
+
+
+def render_stock_of_the_day(api_key, exclude):
+    """Screen a daily sample of large US companies and show the best one, with the numbers behind it."""
+    st.subheader("💡 Stock of the day")
+    st.caption(
+        "An idea to research, not a recommendation. Each day a sample of large US companies you don't already follow is "
+        "screened on valuation, growth, profitability, debt, price trend and analyst views; the best-scoring one is shown "
+        "with the data behind every pro and con. It is a screen on past numbers and cannot see what happens next."
+    )
+    offset = st.session_state.get("idea_offset", 0)
+    today = dt.date.today()
+    candidates = il.pick_candidates(il.UNIVERSE, exclude, today.toordinal(), n=6, offset=offset)
+
+    evals, failed = [], []
+    with st.spinner("Screening today's candidates…"):
+        for sym in candidates:
+            try:
+                evals.append(il.evaluate(sym, fetch_quote(sym, api_key), fetch_metrics(sym, api_key), fetch_recommendation_trend(sym, api_key)))
+            except Exception:
+                failed.append(sym)  # rate limit or a bad ticker: skip it, don't hide the rest
+    best = il.choose(evals)
+
+    if best is None:
+        st.info(
+            "Couldn't screen enough candidates right now"
+            + (f" ({len(failed)} failed to load, probably the free API's per-minute limit)" if failed else "")
+            + ". Try again in a minute."
+        )
+    else:
+        sym = best["symbol"]
+        try:
+            name = fetch_profile(sym, api_key).get("name") or ""
+        except Exception:
+            name = ""
+        with st.container(border=True):
+            st.markdown(f"### {sym}" + (f" · {name}" if name else ""))
+            m1, m2, m3, m4 = st.columns(4)
+            facts = dict(best["facts"])
+            m1.metric("Price", f"${best['price']:,.2f}" if best["price"] else "—", delta=f"{best['day_pct']:+.2f}% today" if best["day_pct"] is not None else None)
+            m2.metric("P/E (TTM)", facts.get("P/E (TTM)", "—"))
+            m3.metric("Below 52-wk high", facts.get("Below 52-week high", "—"))
+            m4.metric("Analyst score", f"{best['analyst_score']:+.2f}" if best["analyst_score"] is not None else "—", help="−2 (all Strong Sell) to +2 (all Strong Buy).")
+            pro_col, con_col = st.columns(2)
+            with pro_col:
+                st.markdown("**What looks good**")
+                for label, text in best["pros"] or [("", "Nothing stood out as a clear positive on these measures.")]:
+                    st.markdown(f"- **{label}:** {text}" if label else f"- {text}")
+            with con_col:
+                st.markdown("**What to watch**")
+                for label, text in best["cons"] or [("", "No red flags on these measures.")]:
+                    st.markdown(f"- **{label}:** {text}" if label else f"- {text}")
+                st.markdown("- **Always:** one company can fall far more than a diversified fund, and these numbers look backward.")
+            st.caption(f"Screened {len(evals)} candidates today; {sym} had the best score per measure with data ({best['covered']} measures had data).")
+
+        with st.expander("All the numbers for " + sym):
+            st.dataframe(pd.DataFrame(best["facts"], columns=["Measure", "Value"]), hide_index=True, width="stretch")
+        with st.expander("Other candidates screened today"):
+            st.dataframe(pd.DataFrame(il.comparison_rows(evals)), hide_index=True, width="stretch")
+            if failed:
+                st.caption(f"Didn't load (likely the API's per-minute limit): {', '.join(failed)}")
+
+    with st.expander("How this is scored"):
+        st.markdown("Each measure scores a **pro** or **con** only when it crosses these lines. A pick needs data on at least "
+                    f"{il.MIN_FACTORS} measures, and the winner has the best net score per measure with data.")
+        st.dataframe(pd.DataFrame(il.RULES, columns=["Measure", "What it looks at", "Rule"]), hide_index=True, width="stretch")
+        st.caption("Thresholds are rules of thumb, not predictions. Data: Finnhub free tier.")
+    if st.button("Show a different idea"):
+        st.session_state["idea_offset"] = offset + 1
+        st.rerun()
 
 
 def main():
@@ -205,41 +359,10 @@ def main():
     st.dataframe(df.style.format(fmt, na_rep="—"), width="stretch", hide_index=True)
 
     st.divider()
-    st.subheader("Analyst consensus & price targets")
+    render_analyst_section(df, portfolio, api_key)
 
-    ordered = [x for x in df["Symbol"]] or tickers
-    tabs = st.tabs(ordered)
-    for tab, symbol in zip(tabs, ordered):
-        with tab:
-            col1, col2 = st.columns([2, 1])
-            try:
-                trend_data = fetch_recommendation_trend(symbol, api_key)
-            except Exception as e:
-                col1.warning(f"Couldn't load analyst data for {symbol}: {e}")
-                trend_data = []
-
-            if trend_data:
-                latest = trend_data[0]
-                col1.plotly_chart(render_consensus_bar(latest), width="stretch")
-                col1.caption(f"As of period ending {latest.get('period', 'unknown')}.")
-            else:
-                col1.info("No analyst recommendation data available for this ticker.")
-
-            try:
-                pt = fetch_price_target(symbol, api_key)
-                if pt and pt.get("targetMean"):
-                    col2.metric("Mean price target", f"${pt['targetMean']:.2f}")
-                    col2.metric("High / Low target", f"${pt['targetHigh']:.2f} / ${pt['targetLow']:.2f}")
-                    col2.caption(f"Based on {pt.get('lastUpdated', 'recent')} data.")
-                else:
-                    col2.info("No price target data available.")
-            except requests.exceptions.HTTPError as e:
-                if e.response is not None and e.response.status_code == 403:
-                    col2.info("Price targets aren't included on the free Finnhub plan.")
-                else:
-                    col2.warning(f"Couldn't load price target: {e}")
-            except Exception as e:
-                col2.warning(f"Couldn't load price target: {e}")
+    st.divider()
+    render_stock_of_the_day(api_key, set(tickers) | held)
 
     st.divider()
     st.caption(
