@@ -1,7 +1,8 @@
 """
 Entry point for Streamlit Community Cloud (Main file path stays `app.py`).
 
-It only lists the pages, which is how they get professional names in the sidebar.
+It only lists the pages, which is how they get professional names. The page menu runs along the top
+of the app, so it is always visible and the sidebar stays free for the password and watchlist.
 The home page itself is dashboard.py.
 """
 
@@ -18,4 +19,4 @@ pages = [
     st.Page("pages/7_Learn.py", title="Learn", icon="🎓", url_path="Learn"),
 ]
 
-st.navigation(pages).run()
+st.navigation(pages, position="top").run()
