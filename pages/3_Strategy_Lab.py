@@ -227,12 +227,12 @@ sections = lt.write_summary(
     start=prices.index[0], end=prices.index[-1], split=split, train_pct=train_pct, benchmark_name=bench.name,
     ms=m_train_s, mb=m_train_b, cagr_no_cost=m_free["cagr"] if m_free else None, luck=luck_res, luck_text=luck_text,
     n_trials=n_trials, has_timing=strat.has_timing, revealed=revealed and overfit is not None,
-    overfit=overfit, ms_test=m_test_s, mb_test=m_test_b,
+    overfit=overfit, ms_test=m_test_s, mb_test=m_test_b, profile=lab.stock_profile(train_b),
 )
 with summary_box:
     tabs = st.tabs([title for title, _ in sections])
     for tab, (_, bullets) in zip(tabs, sections):
         with tab:
             for b in bullets:
-                st.markdown(f"- {b}")
+                st.markdown(f"- {lt.md(b)}")
     st.caption("Written by rules from the numbers on this page, with no AI. It describes this ticker, rule and period only.")
