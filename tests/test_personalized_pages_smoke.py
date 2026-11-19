@@ -26,8 +26,9 @@ SECRETS = {
 class Http:
     """Fake Finnhub: every symbol is up 2% except MSFT (-1%)."""
 
-    def __init__(self, status=200):
+    def __init__(self, status=200, fail_metric=False):
         self.urls = []
+        self.fail_metric = fail_metric
 
     def get(self, url, params=None, headers=None, timeout=None):
         self.urls.append((url, dict(params or {})))
@@ -38,7 +39,13 @@ class Http:
             dp = -1.0 if sym == "MSFT" else 2.0
             resp.json.return_value = {"c": 100.0, "d": dp, "dp": dp, "pc": 98.0}
         elif url.endswith("/stock/profile2"):
-            resp.json.return_value = {"name": f"{sym} Inc"}
+            resp.json.return_value = {} if sym in ("VOO", "QQQ") else {"name": f"{sym} Inc"}  # ETFs have no company profile
+        elif url.endswith("/stock/metric"):
+            if self.fail_metric:
+                resp.raise_for_status.side_effect = RuntimeError("429")
+            resp.json.return_value = {"metric": {
+                "peTTM": 18.0, "revenueGrowthTTMYoy": 14.0, "netProfitMarginTTM": 22.0, "roeTTM": 30.0,
+                "totalDebt/totalEquityQuarterly": 0.3, "52WeekHigh": 120.0, "52WeekLow": 80.0, "beta": 1.0}}
         elif url.endswith("/calendar/earnings"):
             resp.json.return_value = {"earningsCalendar": [{"symbol": "AAPL", "date": "2099-01-01", "hour": "amc"}]}
         elif url.endswith("/stock/recommendation"):
@@ -66,11 +73,14 @@ def make_streamlit(unlocked, extras=""):
     return st
 
 
-def run(monkeypatch, path, unlocked, extras="", positions=POSITIONS):
+def run(monkeypatch, path, unlocked, extras="", positions=POSITIONS, ideas=False, http=None):
     stub_plotly_if_missing()
     st = make_streamlit(unlocked, extras)
-    http = Http()
+    http = http or Http()
     snap_calls = []
+    import idea_lib
+    if not ideas:  # keep the original assertions about which tickers get quoted
+        monkeypatch.setattr(idea_lib, "pick_candidates", lambda *a, **k: [])
 
     def client(cid, key):
         snap_calls.append(1)
@@ -154,3 +164,41 @@ def test_unlocked_with_missing_cost_basis_does_not_crash(monkeypatch, page, miss
             p["average_purchase_price"] = None
     st, http, _ = run(monkeypatch, page, unlocked=True, positions=pos)
     assert st.dataframe.called
+
+
+def markdown_text(st):
+    return " ".join(str(c) for c in st.markdown.call_args_list)
+
+
+def tab_labels(st):
+    return [c.args[0] for c in st.tabs.call_args_list]
+
+
+def test_stock_of_the_day_shows_pick_with_pros_cons_and_excludes_holdings(monkeypatch):
+    st, http, _ = run(monkeypatch, "app.py", unlocked=True, ideas=True)
+    text = markdown_text(st) + text_of(st)
+    assert "Stock of the day" in text and "What looks good" in text and "What to watch" in text
+    pick = next(l.split("### ")[1].split(" ")[0].strip("'\"),") for l in [markdown_text(st)] if "### " in l)
+    assert pick not in ("VOO", "AAPL", "MSFT")          # something you don't already own
+    assert "14.0%" in text                              # a number behind a pro is on the page
+    assert "not a recommendation" in text.lower() or "Not a recommendation" in text
+
+
+def test_stock_of_the_day_survives_rate_limit(monkeypatch):
+    st, _, _ = run(monkeypatch, "app.py", unlocked=True, ideas=True, http=Http(fail_metric=True))
+    assert "Couldn't screen enough candidates" in text_of(st)
+    assert st.dataframe.called                          # rest of the page still rendered
+
+
+def test_analyst_section_splits_stocks_and_funds_unlocked(monkeypatch):
+    st, _, _ = run(monkeypatch, "app.py", unlocked=True)
+    assert tab_labels(st) == [["AAPL", "MSFT"]]         # VOO (an ETF) gets no analyst tab
+    assert "ETFs & funds" in markdown_text(st)
+    assert "no analyst ratings" in text_of(st)
+
+
+def test_analyst_section_splits_stocks_and_funds_locked_sample_list(monkeypatch):
+    st, http, _ = run(monkeypatch, "app.py", unlocked=False)
+    assert tab_labels(st) == [["AAPL", "MSFT"]]         # VOO has no company profile -> treated as a fund
+    assert "ETFs & funds" in markdown_text(st)
+    assert [p["symbol"] for u, p in http.urls if u.endswith("/stock/recommendation")] == ["AAPL", "MSFT"]
