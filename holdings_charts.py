@@ -12,11 +12,11 @@ import plotly.graph_objects as go
 
 SANS = "Inter, system-ui, -apple-system, 'Segoe UI', sans-serif"
 
-# Warm beige / near-black neutrals to match the app theme (.streamlit/config.toml). "surface" is the chart background
+# Cool slate neutrals to match the app theme (.streamlit/config.toml). "surface" is the chart background
 # the palettes were validated against; "panel" is the tooltip card.
 TOKENS = {
-    "light": {"surface": "#eee7d8", "panel": "#f7f2e7", "grid": "#d8cfbc", "muted": "#6b6358", "text": "#14120f", "text2": "#4a453c", "blue": "#2a78d6"},
-    "dark": {"surface": "#12100e", "panel": "#1c1915", "grid": "#2e2a23", "muted": "#9a917f", "text": "#ede6d6", "text2": "#c7bda8", "blue": "#3987e5"},
+    "light": {"surface": "#f5f8fc", "panel": "#ffffff", "grid": "#e3eaf3", "muted": "#7b8aa0", "text": "#0f172a", "text2": "#475569", "blue": "#2a78d6"},
+    "dark": {"surface": "#0b1120", "panel": "#111a2e", "grid": "#1d2a45", "muted": "#7b8aa0", "text": "#e6edf7", "text2": "#aab6ca", "blue": "#3987e5"},
 }
 # Entity -> colour (fixed order slots 1-6; the same class is always the same colour)
 CLASS_COLORS = {
