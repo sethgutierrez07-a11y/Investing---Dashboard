@@ -18,7 +18,7 @@ from typing import Any, Callable
 import pandas as pd
 
 POSITION_COLS = [
-    "Account", "Symbol", "Description", "Units", "Price",
+    "Account", "Symbol", "Description", "Class", "Units", "Price",
     "Market value", "Cost basis", "Gain", "Gain %",
 ]
 # Columns that reveal how much you hold. Units are included because
@@ -102,6 +102,65 @@ def describe_shape(obj: Any, depth: int = 4) -> Any:
     return type(obj).__name__
 
 
+# Sub-objects that hold a *different* symbol/name (currency "$", exchange, etc.).
+# The ticker search never descends into these.
+SKIP_KEYS = {"currency", "exchange", "type", "figi_instrument", "option_symbol"}
+
+CLASS_BY_CODE = {
+    "cs": "Stock", "ps": "Stock", "ad": "Stock", "et": "ETF", "oef": "Fund",
+    "cef": "Fund", "bnd": "Bond", "crypto": "Crypto",
+}
+
+
+def find_str(obj: Any, keys: tuple[str, ...], depth: int = 5) -> str | None:
+    """First non-empty string stored under any of `keys`, searching nested dicts
+    (shallowest first, in the order given) and skipping currency/exchange/type blocks."""
+    if depth < 0 or not isinstance(obj, dict):
+        return None
+    for k in keys:
+        v = obj.get(k)
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+    for k, v in obj.items():
+        if k in SKIP_KEYS or not isinstance(v, dict):
+            continue
+        found = find_str(v, keys, depth - 1)
+        if found:
+            return found
+    return None
+
+
+def find_type_block(obj: Any, depth: int = 5) -> dict | None:
+    """The nested {'code':..., 'description':...} block under a 'type' key, if any."""
+    if depth < 0 or not isinstance(obj, dict):
+        return None
+    t = obj.get("type")
+    if isinstance(t, dict):
+        return t
+    for v in obj.values():
+        if isinstance(v, dict):
+            found = find_type_block(v, depth - 1)
+            if found:
+                return found
+    return None
+
+
+def classify(position: dict) -> str:
+    """ETF / Stock / Fund / Bond / Crypto / Cash equiv. / Other, from SnapTrade's own type info."""
+    if position.get("cash_equivalent") is True:
+        return "Cash equiv."
+    t = find_type_block(position.get("symbol") if isinstance(position.get("symbol"), dict) else position) or {}
+    code = str(t.get("code") or "").lower()
+    if code in CLASS_BY_CODE:
+        return CLASS_BY_CODE[code]
+    desc = str(t.get("description") or "").lower()
+    for needle, label in (("etf", "ETF"), ("exchange traded", "ETF"), ("stock", "Stock"), ("equity", "Stock"),
+                          ("fund", "Fund"), ("bond", "Bond"), ("crypto", "Crypto")):
+        if needle in desc:
+            return label
+    return "Other"
+
+
 def num(x: Any) -> float | None:
     try:
         if x is None or isinstance(x, bool):
@@ -129,19 +188,15 @@ def normalize_positions(account: dict, raw_positions: list[dict]) -> list[dict]:
             continue
         if "units" not in p and "fractional_units" not in p and isinstance(p.get("position"), dict):
             p = p["position"]  # some shapes nest each position one level down
-        ticker = first(
-            p,
-            ("symbol", "symbol", "symbol"),
-            ("symbol", "symbol", "raw_symbol"),
-            ("symbol", "raw_symbol"),
-            ("ticker",),
-        )
-        if ticker is None:
-            inner = dig(p, "symbol", "symbol")  # some shapes put the ticker string here
-            ticker = inner if isinstance(inner, str) else None
-        if isinstance(ticker, dict) or not ticker:
-            ticker = "?"
-        desc = first(p, ("symbol", "symbol", "description"), ("symbol", "description"), default="")
+        sym = p.get("symbol")
+        if isinstance(sym, str):
+            ticker, desc = sym, ""
+        else:
+            scope = sym if isinstance(sym, dict) else p
+            ticker = find_str(scope, ("symbol", "raw_symbol", "ticker")) or find_str(p, ("ticker", "raw_symbol"))
+            desc = find_str(scope, ("description", "name")) or ""
+        ticker = ticker or "?"
+        klass = classify(p)
         units = num(p.get("units"))
         if units is None:
             units = num(p.get("fractional_units"))
@@ -160,7 +215,7 @@ def normalize_positions(account: dict, raw_positions: list[dict]) -> list[dict]:
         rows.append(
             {
                 "Account": label, "Symbol": str(ticker).upper(), "Description": str(desc),
-                "Units": units, "Price": price, "Market value": mv,
+                "Class": klass, "Units": units, "Price": price, "Market value": mv,
                 "Cost basis": cost, "Gain": gain, "Gain %": gain_pct,
             }
         )
@@ -233,7 +288,8 @@ def by_symbol(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
     g = df.groupby("Symbol", as_index=False).agg(
-        {"Units": "sum", "Market value": "sum", "Cost basis": "sum", "Gain": "sum", "Weight %": "sum"}
+        {"Description": "first", "Class": "first", "Units": "sum", "Market value": "sum",
+         "Cost basis": "sum", "Gain": "sum", "Weight %": "sum"}
     )
     g["Gain %"] = g.apply(lambda r: r["Gain"] / r["Cost basis"] * 100 if r["Cost basis"] else None, axis=1)
     return g.sort_values("Market value", ascending=False).reset_index(drop=True)
@@ -330,4 +386,116 @@ def fetch_all(client: Any, on_error: Callable[[Exception], str] = lambda e: type
         except Exception as e:  # noqa: BLE001 — report, don't crash the page
             item["error"] = on_error(e)
         out.append(item)
+    return out
+
+
+# --------------------------------------------------------------------------
+# Presentation helpers (pure, tested)
+# --------------------------------------------------------------------------
+def money(x: float | None, signed: bool = False) -> str:
+    if x is None or pd.isna(x):
+        return "—"
+    s = f"${abs(x):,.0f}"
+    if signed:
+        return ("+" if x >= 0 else "−") + s
+    return ("−" + s) if x < 0 else s
+
+
+def pct(x: float | None, signed: bool = True, digits: int = 1) -> str:
+    if x is None or pd.isna(x):
+        return "—"
+    return f"{x:+.{digits}f}%" if signed else f"{x:.{digits}f}%"
+
+
+def summarize(df: pd.DataFrame, cash: float) -> dict:
+    """Headline numbers. Gain only counts positions whose cost basis is known."""
+    invested = float(df["Market value"].sum(skipna=True)) if not df.empty else 0.0
+    total = invested + cash
+    known = df[df["Cost basis"].notna() & df["Gain"].notna()] if not df.empty else df
+    cost = float(known["Cost basis"].sum()) if not known.empty else 0.0
+    gain = float(known["Gain"].sum()) if not known.empty else None
+    return {
+        "total": total,
+        "invested": invested,
+        "cash": cash,
+        "cash_pct": cash / total * 100 if total > 0 else None,
+        "gain": gain,
+        "gain_pct": (gain / cost * 100) if (gain is not None and cost) else None,
+        "gain_coverage": (float(known["Market value"].sum()) / invested) if invested > 0 and not known.empty else 0.0,
+        # money-market / cash-equivalent positions are cash, not holdings
+        "n_holdings": int(df.loc[df["Class"] != "Cash equiv.", "Symbol"].nunique()) if not df.empty else 0,
+    }
+
+
+def asset_mix(df: pd.DataFrame, cash: float) -> pd.DataFrame:
+    """Share of the whole portfolio by asset class (cash included)."""
+    if df.empty and cash <= 0:
+        return pd.DataFrame(columns=["Class", "Value", "Share %"])
+    g = df.groupby("Class")["Market value"].sum() if not df.empty else pd.Series(dtype=float)
+    out = g.rename("Value").reset_index()
+    if cash > 0:
+        out = pd.concat([out, pd.DataFrame([{"Class": "Cash", "Value": cash}])], ignore_index=True)
+    out["Class"] = out["Class"].replace({"Cash equiv.": "Cash"})  # money-market funds count as cash
+    out = out.groupby("Class", as_index=False)["Value"].sum()  # one row per class
+    total = out["Value"].sum()
+    out["Share %"] = out["Value"] / total * 100 if total > 0 else 0.0
+    return out.sort_values("Value", ascending=False).reset_index(drop=True)
+
+
+def top_for_bars(merged: pd.DataFrame, n: int = 10) -> pd.DataFrame:
+    """Top n holdings, with the tail folded into one 'Other (k)' row."""
+    if merged.empty or len(merged) <= n:
+        return merged[["Symbol", "Description", "Weight %"]].copy() if not merged.empty else merged
+    head = merged.head(n)[["Symbol", "Description", "Weight %"]]
+    tail = merged.iloc[n:]
+    other = pd.DataFrame([{"Symbol": f"Other ({len(tail)})", "Description": "Smaller positions",
+                           "Weight %": float(tail["Weight %"].sum())}])
+    return pd.concat([head, other], ignore_index=True)
+
+
+def gain_rows(merged: pd.DataFrame, limit: int = 15) -> pd.DataFrame:
+    """Positions with a known % gain, best first (biggest movers if there are many)."""
+    g = merged[merged["Gain %"].notna()].copy()
+    if g.empty:
+        return g
+    if len(g) > limit:
+        g = g.reindex(g["Gain %"].abs().sort_values(ascending=False).index).head(limit)
+    return g.sort_values("Gain %", ascending=False).reset_index(drop=True)
+
+
+def insights(summary: dict, conc: dict, mix: pd.DataFrame, merged: pd.DataFrame) -> list[str]:
+    """Plain-English observations. Descriptive only: never a buy/sell suggestion."""
+    out: list[str] = []
+    if merged.empty:
+        return out
+    top = merged.iloc[0]
+    if len(merged) == 1:
+        out.append(f"You hold a single position ({top['Symbol']}), so it is necessarily 100% of what you've invested.")
+    else:
+        out.append(f"{top['Symbol']} is your largest holding at {top['Weight %']:.0f}% of the portfolio.")
+        if conc.get("effective_n"):
+            out.append(
+                f"By size, your portfolio behaves like about {conc['effective_n']:.1f} equal-sized holdings "
+                f"(you own {len(merged)})."
+            )
+    if not mix.empty:
+        etf = mix.loc[mix["Class"] == "ETF", "Share %"]
+        if not etf.empty and etf.iloc[0] >= 30:
+            out.append(
+                f"ETFs are {etf.iloc[0]:.0f}% of your portfolio. An ETF is a basket, so you own many more "
+                "underlying companies than your position count suggests."
+            )
+    cp = summary.get("cash_pct")
+    if cp is not None:
+        if cp >= 20:
+            out.append(f"Cash is {cp:.0f}% of the portfolio.")
+        elif cp < 2:
+            out.append("You are almost fully invested; cash is under 2%.")
+    g = gain_rows(merged)
+    if len(g) >= 2:
+        best, worst = g.iloc[0], g.iloc[-1]
+        out.append(f"Best performer since purchase: {best['Symbol']} ({pct(best['Gain %'])}). "
+                   f"Weakest: {worst['Symbol']} ({pct(worst['Gain %'])}).")
+    if summary.get("gain_coverage", 1) < 0.9 and summary.get("gain") is not None:
+        out.append("Cost basis is missing for part of your holdings, so total gain covers only the positions that have it.")
     return out
