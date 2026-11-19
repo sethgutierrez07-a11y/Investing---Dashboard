@@ -242,3 +242,78 @@ def test_make_client_clear_error_without_sdk():
     # SDK isn't installed here; the failure must be an ImportError we can show, not a crash elsewhere
     with pytest.raises((ImportError, RuntimeError)):
         hl.make_client("id", "key")
+
+
+# ---- tolerance for unexpected response shapes (the real-world crash) ----
+def test_positions_wrapped_in_a_dict_are_read():
+    wrapped = {"positions": [pos("AAPL", 2, 100.0)], "option_positions": []}
+    rows = hl.normalize_positions(ACCT, wrapped)
+    assert [r["Symbol"] for r in rows] == ["AAPL"]
+
+
+def test_dict_with_single_list_inside_is_read_even_with_unknown_key():
+    rows = hl.normalize_positions(ACCT, {"holdings_list": [pos("MSFT", 1, 10.0)], "count": 1})
+    assert [r["Symbol"] for r in rows] == ["MSFT"]
+
+
+def test_non_dict_items_are_skipped_not_fatal():
+    # iterating a dict yields strings; strings/ints/lists inside a list must not crash
+    junk = ["positions", 5, None, ["x"], pos("VOO", 1, 10.0)]
+    assert [r["Symbol"] for r in hl.normalize_positions(ACCT, junk)] == ["VOO"]
+    assert hl.normalize_positions(ACCT, {"a": 1, "b": 2}) == []
+    assert hl.normalize_positions(ACCT, "oops") == []
+
+
+def test_each_position_nested_one_level_down():
+    nested = [{"position": pos("TSLA", 3, 10.0)}]
+    assert [r["Symbol"] for r in hl.normalize_positions(ACCT, nested)] == ["TSLA"]
+
+
+def test_balances_tolerate_wrapper_and_junk():
+    assert hl.cash_from_balances({"balances": [{"currency": {"code": "USD"}, "cash": 7}]}) == {"USD": 7.0}
+    assert hl.cash_from_balances(["x", None, {"cash": 3}]) == {"USD": 3.0}
+    assert hl.cash_from_balances("nope") == {}
+
+
+def test_to_plain_handles_dict_likes_that_are_not_dict_subclasses():
+    from collections.abc import Mapping
+
+    class FrozenLike(Mapping):
+        def __init__(self, d): self._d = d
+        def __getitem__(self, k): return self._d[k]
+        def __iter__(self): return iter(self._d)
+        def __len__(self): return len(self._d)
+
+    plain = hl.to_plain(FrozenLike({"units": 2, "symbol": FrozenLike({"symbol": "A"})}))
+    assert plain == {"units": 2, "symbol": {"symbol": "A"}}
+
+
+def test_build_portfolio_survives_wrapped_and_junk_payloads():
+    item_ = {"account": ACCT, "positions": {"positions": [pos("A", 1, 10.0), "junk"]},
+             "balances": {"balances": [{"currency": {"code": "USD"}, "cash": 5}]}, "error": None}
+    pf = hl.build_portfolio([item_])
+    assert len(pf["positions"]) == 1 and pf["cash"] == 5
+
+
+def test_describe_shape_has_names_and_types_but_never_values():
+    payload = [{"symbol": {"symbol": {"symbol": "SECRETTICKER"}}, "units": 123456.789, "price": 99.5,
+                "currency": {"code": "USD"}, "tags": []}]
+    shape = hl.describe_shape(payload)
+    text = str(shape)
+    assert "SECRETTICKER" not in text and "123456" not in text and "99.5" not in text
+    assert "units" in text and "float" in text and "list of 1" in text
+    assert hl.describe_shape([]) == "list (empty)"
+    assert hl.describe_shape("x") == "str"
+
+
+def test_fetch_all_records_shape_without_values_and_tolerates_wrapped_accounts():
+    class Wrapped(FakeAccountInfo):
+        def list_user_accounts(self):
+            return FakeResp({"accounts": [ACCT, "junk"]})
+
+    c = FakeClient()
+    c.account_information = Wrapped()
+    out = hl.fetch_all(c)
+    assert len(out) == 1
+    assert "units" in str(out[0]["shape"]["positions"])
+    assert "Z12345678" not in str(out[0]["shape"])

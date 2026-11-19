@@ -97,13 +97,26 @@ if not raw:
     st.info("SnapTrade is reachable, but no brokerage accounts are connected yet. Connect Fidelity in the SnapTrade dashboard.")
     st.stop()
 
-pf = hl.build_portfolio(raw)
+def show_shape():
+    """Field names and types only, never amounts. Safe to copy into a chat for debugging."""
+    with st.expander("Data shape (field names only, no values)"):
+        st.json([r.get("shape", {}) for r in raw])
+
+
+try:
+    pf = hl.build_portfolio(raw)
+except Exception as e:
+    st.error(f"Connected, but I couldn't read the data shape SnapTrade returned ({type(e).__name__}).")
+    show_shape()
+    st.stop()
+
 df = pf["positions"]
 for w in pf["warnings"]:
     st.warning(w)
 
 if df.empty:
     st.info("Connected, but no positions were found. If you only hold cash, that's expected.")
+    show_shape()
     st.stop()
 
 # ---------- Headline numbers ----------
@@ -174,3 +187,5 @@ if not hide:
     fmt["Gain"] = st.column_config.NumberColumn(format="%+.0f")
 st.dataframe(show, hide_index=True, width="stretch", column_config=fmt)
 st.caption("Gain uses SnapTrade's average purchase price. Cost basis can be incomplete for transferred or reinvested shares.")
+
+show_shape()
