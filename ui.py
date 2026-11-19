@@ -152,6 +152,39 @@ def tip_card(tip: dict, full: bool = False) -> None:
                 pass
 
 
+def deep_dive_button(symbol: str, key: str, label: str = "Open the full deep-dive →") -> None:
+    """Jump to the Stock Deep-Dive tab with this ticker preselected."""
+    import streamlit as st
+    if st.button(label, key=key):
+        st.session_state["deep_symbol"] = symbol
+        try:
+            st.switch_page("pages/8_Deep_Dive.py")
+        except Exception:
+            st.info("Open the Stock Deep-Dive tab to see it.")
+
+
+def idea_compact(res: dict, key: str) -> None:
+    """Short Stock-of-the-day card for pages that are not the dashboard. `res` is idea_state.screen_today()'s result."""
+    import streamlit as st
+    best = res.get("best")
+    with st.container(border=True):
+        label("💡 Stock of the day · an idea to research")
+        if not best:
+            st.caption("Couldn't screen enough candidates right now (the free data plan has a per-minute limit). Try again in a minute.")
+            return
+        sym = best["symbol"]
+        day = best.get("day_pct")
+        head = f"**{sym}**" + (f" · {res['name']}" if res.get("name") else "")
+        if best.get("price"):
+            head += f" · ${best['price']:,.2f}" + (f" ({day:+.2f}% today)" if day is not None else "")
+        st.markdown(esc(head))
+        good = "; ".join(f"{lab.lower()}" for lab, _ in best["pros"][:3]) or "nothing stood out"
+        watch = "; ".join(f"{lab.lower()}" for lab, _ in best["cons"][:3]) or "no red flags on these measures"
+        st.markdown(esc(f"Looks good: {good}. Watch: {watch}."))
+        st.caption("A screen on past numbers, not a recommendation.")
+        deep_dive_button(sym, key)
+
+
 def eyebrow(text: str) -> None:
     import streamlit as st
     st.markdown(f'<div class="ix-eyebrow"><span class="ix-dot"></span>{escape(text)}</div>', unsafe_allow_html=True)
@@ -213,6 +246,7 @@ NAV = [
     ("pages/4_Dividends.py", "Dividends", "💰", "Income received, what's coming, and reinvesting."),
     ("pages/5_Risk.py", "Risk", "🛡️", "How bumpy your mix is and how it holds up in a fall."),
     ("pages/6_Market.py", "Market", "🌐", "Indexes, sectors, rates and a calendar of what's coming."),
+    ("pages/8_Deep_Dive.py", "Stock Deep-Dive", "🔬", "One company in plain words: key numbers, pros and cons."),
     ("pages/7_Learn.py", "Learn", "🎓", "A plain-English glossary and a financial tip every day."),
 ]
 
