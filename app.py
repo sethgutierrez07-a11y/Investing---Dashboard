@@ -16,6 +16,7 @@ pages = [
     st.Page("pages/4_Dividends.py", title="Dividends", icon="💰", url_path="Dividends"),
     st.Page("pages/5_Risk.py", title="Risk", icon="🛡️", url_path="Risk"),
     st.Page("pages/6_Market.py", title="Market", icon="🌐", url_path="Market"),
+    st.Page("pages/8_Deep_Dive.py", title="Stock Deep-Dive", icon="🔬", url_path="Deep_Dive"),
     st.Page("pages/7_Learn.py", title="Learn", icon="🎓", url_path="Learn"),
 ]
 

@@ -20,6 +20,7 @@ import datetime as dt
 
 import holdings_lib as hl
 import idea_lib as il
+import idea_state as ist
 import learn_lib as ll
 import portfolio_state as ps
 
@@ -235,17 +236,8 @@ def render_stock_of_the_day(api_key, exclude):
         "with the data behind every pro and con. It is a screen on past numbers and cannot see what happens next."
     )
     offset = st.session_state.get("idea_offset", 0)
-    today = dt.date.today()
-    candidates = il.pick_candidates(il.UNIVERSE, exclude, today.toordinal(), n=6, offset=offset)
-
-    evals, failed = [], []
-    with st.spinner("Screening today's candidates…"):
-        for sym in candidates:
-            try:
-                evals.append(il.evaluate(sym, fetch_quote(sym, api_key), fetch_metrics(sym, api_key), fetch_recommendation_trend(sym, api_key)))
-            except Exception:
-                failed.append(sym)  # rate limit or a bad ticker: skip it, don't hide the rest
-    best = il.choose(evals)
+    res = ist.screen_today(api_key, tuple(sorted(exclude)), ui.today_central().toordinal(), offset)
+    evals, failed, best = res["evals"], res["failed"], res["best"]
 
     if best is None:
         st.info(
@@ -255,10 +247,7 @@ def render_stock_of_the_day(api_key, exclude):
         )
     else:
         sym = best["symbol"]
-        try:
-            name = fetch_profile(sym, api_key).get("name") or ""
-        except Exception:
-            name = ""
+        name = res["name"]
         with st.container(border=True):
             st.markdown(f"### {sym}" + (f" · {name}" if name else ""))
             m1, m2, m3, m4 = st.columns(4)
@@ -278,6 +267,7 @@ def render_stock_of_the_day(api_key, exclude):
                     st.markdown(f"- **{label}:** {text}" if label else f"- {text}")
                 st.markdown("- **Always:** one company can fall far more than a diversified fund, and these numbers look backward.")
             st.caption(f"Screened {len(evals)} candidates today; {sym} had the best score per measure with data ({best['covered']} measures had data).")
+            ui.deep_dive_button(sym, "dash_deep")
 
         with st.expander("All the numbers for " + sym):
             st.dataframe(pd.DataFrame(best["facts"], columns=["Measure", "Value"]), hide_index=True, width="stretch")
@@ -380,7 +370,7 @@ def main():
     render_analyst_section(df, portfolio, api_key)
 
     st.divider()
-    render_stock_of_the_day(api_key, set(tickers) | held)
+    render_stock_of_the_day(api_key, ist.exclusions(held))
 
     st.divider()
     st.caption(

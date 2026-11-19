@@ -227,8 +227,8 @@ def test_entry_point_gives_pages_professional_names(monkeypatch):
     monkeypatch.setitem(sys.modules, "streamlit", st)
     runpy.run_path(str(ROOT / "app.py"), run_name="__main__")
     pages = st.navigation.call_args.args[0]
-    assert [k["title"] for _, k in pages] == ["Investing Dashboard", "Daily Brief", "Holdings", "Strategy Lab", "Dividends", "Risk", "Market", "Learn"]
-    assert [p for p, _ in pages] == ["dashboard.py", "pages/1_Daily_Brief.py", "pages/2_Holdings.py", "pages/3_Strategy_Lab.py", "pages/4_Dividends.py", "pages/5_Risk.py", "pages/6_Market.py", "pages/7_Learn.py"]
+    assert [k["title"] for _, k in pages] == ["Investing Dashboard", "Daily Brief", "Holdings", "Strategy Lab", "Dividends", "Risk", "Market", "Stock Deep-Dive", "Learn"]
+    assert [p for p, _ in pages] == ["dashboard.py", "pages/1_Daily_Brief.py", "pages/2_Holdings.py", "pages/3_Strategy_Lab.py", "pages/4_Dividends.py", "pages/5_Risk.py", "pages/6_Market.py", "pages/8_Deep_Dive.py", "pages/7_Learn.py"]
     assert st.navigation.call_args.kwargs.get("position") == "top"      # always-visible menu, sidebar left for controls
     assert sum(1 for _, k in pages if k.get("default")) == 1
     for p, _ in pages:

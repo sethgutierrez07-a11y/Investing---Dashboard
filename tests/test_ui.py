@@ -168,7 +168,7 @@ def test_fonts_and_streamlit_version_support_the_theme():
 
 # ---------------------------------------------------------------- every page uses it
 @pytest.mark.parametrize("page", ["dashboard.py", "pages/1_Daily_Brief.py", "pages/2_Holdings.py", "pages/3_Strategy_Lab.py",
-                                  "pages/4_Dividends.py", "pages/5_Risk.py", "pages/6_Market.py", "pages/7_Learn.py"])
+                                  "pages/4_Dividends.py", "pages/5_Risk.py", "pages/6_Market.py", "pages/7_Learn.py", "pages/8_Deep_Dive.py"])
 def test_every_page_applies_the_style_right_after_page_config(page):
     src = (ROOT / page).read_text()
     assert re.search(r"^st\.set_page_config\(.*\)\nui\.apply\(\)\n", src, re.M), page

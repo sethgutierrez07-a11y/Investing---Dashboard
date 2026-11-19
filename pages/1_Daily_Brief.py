@@ -18,6 +18,7 @@ import ui
 import brief_lib as bl
 import brief_text as bt
 import holdings_lib as hl
+import idea_state as ist
 import portfolio_state as ps
 
 st.set_page_config(page_title="Daily Brief", layout="wide")
@@ -102,6 +103,7 @@ today = dt.date.today()
 # is filled in at the bottom of the script into this placeholder.
 st.subheader("Today's brief")
 brief_box = st.container()
+idea_box = st.container()   # the stock of the day: filled at the bottom so the brief itself shows first
 st.divider()
 st.subheader("The data behind it")
 
@@ -309,3 +311,7 @@ with brief_box:
                 st.caption("AI-written from the data below. It can be wrong. Check the sections below before relying on it.")
             except Exception as e:
                 st.warning(f"Couldn't write the brief: {e}")
+
+with idea_box:
+    ui.idea_compact(ist.screen_today(api_key, tuple(sorted(ist.exclusions(held))), ui.today_central().toordinal(),
+                                     st.session_state.get("idea_offset", 0)), "brief_deep")
