@@ -41,81 +41,18 @@ def test_gradient_title_underline_never_clips_the_emoji():
     assert "text-fill-color" not in ui.css("dark") and "background-clip: text" not in ui.css("dark")
 
 
-def run_apply(typ="light", state=None, query=None, picked=None):
-    """Run ui.apply() against a stand-in streamlit. Returns (stand-in, the injected html)."""
-    st = MagicMock()
-    st.context.theme.type = typ
-    st.session_state = dict(state or {})
-    st.query_params = dict(query or {})
-    st.sidebar.segmented_control.return_value = picked
-    saved = sys.modules.get("streamlit")
-    sys.modules["streamlit"] = st
-    try:
-        ui.apply()
-    finally:
-        sys.modules["streamlit"] = saved
-    (call,) = st.markdown.call_args_list
-    assert call.kwargs["unsafe_allow_html"] is True
-    return st, call.args[0]
-
-
 def test_apply_injects_one_style_block_for_the_active_theme():
-    for typ, expect in (("light", "#14120f"), ("dark", "#ede6d6")):
-        st, html = run_apply(typ)
-        assert html.startswith("<style>") and html.rstrip().endswith("</style>") and expect in html
-
-
-# ---------------------------------------------------------------- the two looks
-def test_the_two_looks_differ_and_unknown_falls_back_to_editorial():
-    ed, rs = ui.css("light", "editorial"), ui.css("light", "research")
-    assert ed != rs and "Instrument Serif" in ed and "IBM Plex Mono" in rs and "Instrument Serif" not in rs
-    assert ui.css("light", "nonsense") == ed and ui.css("light") == ed
-    for m in ("light", "dark"):
-        for name in ui.LOOKS:
-            c = ui.css(m, name)
-            assert "\n\n" not in c and c.count("{") == c.count("}") and "{p[" not in c
-
-
-def test_font_imports_come_first_or_the_browser_ignores_them():
-    for name in ui.LOOKS:
-        lines = ui.css("dark", name).splitlines()
-        first_rule = next(i for i, ln in enumerate(lines) if not ln.startswith("@import"))
-        assert first_rule >= 1 and all(not ln.startswith("@import") for ln in lines[first_rule:])
-
-
-def test_apply_shows_the_switch_and_uses_the_chosen_look():
-    st, html = run_apply("light", picked="research")
-    (args, kwargs) = st.sidebar.segmented_control.call_args
-    assert args[0] == "Look" and list(args[1]) == list(ui.LOOKS) and kwargs["key"] == "look" and kwargs["default"] == "editorial"
-    assert "IBM Plex Mono" in html and "Instrument Serif" not in html
-    assert st.query_params["look"] == "research"                    # the address carries it, so a reload keeps it
-
-
-def test_look_comes_from_the_session_then_the_address_then_the_default():
-    assert run_apply(state={"look": "research"})[0].query_params["look"] == "research"
-    assert "IBM Plex Mono" in run_apply(query={"look": "research"})[1]
-    assert "Instrument Serif" in run_apply()[1]
-    assert "Instrument Serif" in run_apply(state={"look": "bogus"}, query={"look": "bogus"})[1]
-
-
-def test_deselecting_the_switch_keeps_the_current_look():
-    _, html = run_apply(state={"look": "research"}, picked=None)
-    assert "IBM Plex Mono" in html
-
-
-def test_a_broken_switch_never_breaks_the_page():
-    st = MagicMock()
-    st.context.theme.type = "light"
-    st.session_state = {}
-    st.query_params = {}
-    st.sidebar.segmented_control.side_effect = RuntimeError("old streamlit")
-    saved = sys.modules.get("streamlit")
-    sys.modules["streamlit"] = st
-    try:
-        ui.apply()
-    finally:
-        sys.modules["streamlit"] = saved
-    assert st.markdown.called
+    for typ, expect in (("light", "#0369a1"), ("dark", "#38bdf8")):
+        st = MagicMock()
+        st.context.theme.type = typ
+        sys.modules["streamlit"], saved = st, sys.modules.get("streamlit")
+        try:
+            ui.apply()
+        finally:
+            sys.modules["streamlit"] = saved
+        (call,) = st.markdown.call_args_list
+        assert call.args[0].startswith("<style>") and call.args[0].rstrip().endswith("</style>")
+        assert call.kwargs["unsafe_allow_html"] is True and expect in call.args[0]
 
 
 def test_mode_defaults_to_dark_when_streamlit_cannot_say():

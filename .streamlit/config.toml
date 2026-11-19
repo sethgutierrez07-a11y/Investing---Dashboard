@@ -1,60 +1,58 @@
-# Look and feel for the whole app: warm beige and near-black. Theme options are native Streamlit settings,
-# and ui.py adds a small, defensive CSS layer on top, with two switchable "looks" (Editorial and Research).
-# Light (beige ground, black ink) and dark (black ground, beige ink) follow the viewer's device;
+# Look and feel for the whole app. Theme options are native Streamlit settings (no CSS hacks needed),
+# and ui.py adds a small, defensive CSS layer on top. Light and dark follow the viewer's device;
 # the viewer can switch in the app's Settings menu.
 
 [browser]
 gatherUsageStats = false
 
 [theme]
-# Typography: Inter for text, Newsreader for headings, IBM Plex Mono for numbers and code.
-# (The two looks in ui.py also load Instrument Serif for the Editorial look.)
+# Typography: Inter for text, Space Grotesk for headings, JetBrains Mono for code.
 # (Fonts load from Google Fonts; if blocked, the browser falls back to its default sans-serif.)
 font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
-headingFont = "Newsreader:https://fonts.googleapis.com/css2?family=Newsreader:wght@400;500;600&display=swap"
-codeFont = "'IBM Plex Mono':https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap"
-baseRadius = "0.4rem"
-buttonRadius = "0.4rem"
+headingFont = "'Space Grotesk':https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&display=swap"
+codeFont = "'JetBrains Mono':https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap"
+baseRadius = "0.75rem"
+buttonRadius = "0.6rem"
 showWidgetBorder = true
 showSidebarBorder = true
-linkUnderline = true
+linkUnderline = false
 
 [theme.dark]
-primaryColor = "#ede6d6"
-backgroundColor = "#12100e"
-secondaryBackgroundColor = "#1c1915"
-textColor = "#ede6d6"
-linkColor = "#ede6d6"
-borderColor = "#3a352d"
-dataframeBorderColor = "#2e2a23"
-dataframeHeaderBackgroundColor = "#221e19"
-codeBackgroundColor = "#1c1915"
-greenColor = "#8fb07a"
-redColor = "#d98068"
-blueColor = "#bdb29b"
-violetColor = "#b8a9c0"
+primaryColor = "#38bdf8"
+backgroundColor = "#0b1120"
+secondaryBackgroundColor = "#111a2e"
+textColor = "#e6edf7"
+linkColor = "#7dd3fc"
+borderColor = "#243350"
+dataframeBorderColor = "#1d2a45"
+dataframeHeaderBackgroundColor = "#14203a"
+codeBackgroundColor = "#0f182b"
+greenColor = "#2bb673"
+redColor = "#e5575b"
+blueColor = "#38bdf8"
+violetColor = "#a78bfa"
 
 [theme.dark.sidebar]
-backgroundColor = "#0d0b09"
-secondaryBackgroundColor = "#1c1915"
-borderColor = "#2e2a23"
+backgroundColor = "#080d19"
+secondaryBackgroundColor = "#101830"
+borderColor = "#1b2740"
 
 [theme.light]
-primaryColor = "#14120f"
-backgroundColor = "#eee7d8"
-secondaryBackgroundColor = "#f7f2e7"
-textColor = "#14120f"
-linkColor = "#14120f"
-borderColor = "#cfc5b0"
-dataframeBorderColor = "#cfc5b0"
-dataframeHeaderBackgroundColor = "#e3dac6"
-codeBackgroundColor = "#e3dac6"
-greenColor = "#4f6b3a"
-redColor = "#9a3b2b"
-blueColor = "#4a453c"
-violetColor = "#6b5b73"
+primaryColor = "#0369a1"
+backgroundColor = "#f5f8fc"
+secondaryBackgroundColor = "#e9eff7"
+textColor = "#0f172a"
+linkColor = "#0369a1"
+borderColor = "#d3deec"
+dataframeBorderColor = "#d3deec"
+dataframeHeaderBackgroundColor = "#e9eff7"
+codeBackgroundColor = "#e9eff7"
+greenColor = "#0b8a55"
+redColor = "#cf3338"
+blueColor = "#0369a1"
+violetColor = "#6d4fd6"
 
 [theme.light.sidebar]
-backgroundColor = "#e3dac6"
-secondaryBackgroundColor = "#f7f2e7"
-borderColor = "#cfc5b0"
+backgroundColor = "#eaf0f8"
+secondaryBackgroundColor = "#ffffff"
+borderColor = "#d3deec"
