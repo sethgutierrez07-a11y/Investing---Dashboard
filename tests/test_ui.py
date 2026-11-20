@@ -41,18 +41,86 @@ def test_gradient_title_underline_never_clips_the_emoji():
     assert "text-fill-color" not in ui.css("dark") and "background-clip: text" not in ui.css("dark")
 
 
+def run_apply(typ="light", state=None):
+    """Run ui.apply() against a stand-in streamlit. Returns (stand-in, markdown calls)."""
+    st = MagicMock()
+    st.context.theme.type = typ
+    st.session_state = {} if state is None else state
+    saved = sys.modules.get("streamlit")
+    sys.modules["streamlit"] = st
+    try:
+        ui.apply()
+    finally:
+        sys.modules["streamlit"] = saved
+    return st, st.markdown.call_args_list
+
+
 def test_apply_injects_one_style_block_for_the_active_theme():
     for typ, expect in (("light", "#0369a1"), ("dark", "#38bdf8")):
-        st = MagicMock()
-        st.context.theme.type = typ
-        sys.modules["streamlit"], saved = st, sys.modules.get("streamlit")
-        try:
-            ui.apply()
-        finally:
-            sys.modules["streamlit"] = saved
-        (call,) = st.markdown.call_args_list
-        assert call.args[0].startswith("<style>") and call.args[0].rstrip().endswith("</style>")
-        assert call.kwargs["unsafe_allow_html"] is True and expect in call.args[0]
+        st, calls = run_apply(typ)
+        first = calls[0]
+        assert first.args[0].startswith("<style>") and first.args[0].rstrip().endswith("</style>")
+        assert first.kwargs["unsafe_allow_html"] is True and expect in first.args[0]
+
+
+# ---------------------------------------------------------------- the hello
+def utc(y, mo, d, h, mi=0):
+    return dt.datetime(y, mo, d, h, mi, tzinfo=dt.timezone.utc)
+
+
+def test_greeting_follows_central_time_through_the_day():
+    cdt = lambda h: ui.greeting(utc(2026, 7, 15, h + 5))[0]       # summer: Central = UTC-5
+    assert cdt(4) == "Good evening, Seth." and cdt(5) == "Good morning, Seth." and cdt(11) == "Good morning, Seth."
+    assert cdt(12) == "Good afternoon, Seth." and cdt(16) == "Good afternoon, Seth." and cdt(17) == "Good evening, Seth."
+    assert ui.greeting(utc(2026, 1, 15, 18))[0] == "Good afternoon, Seth."          # winter: 12:00 CST
+    assert ui.greeting(utc(2026, 11, 20, 3))[1] == "Thursday, November 19"       # 9 PM CST the night before: still the 19th
+
+
+def test_welcome_html_is_escaped_inert_and_has_no_blank_lines():
+    h = ui.welcome_html(utc(2026, 11, 20, 3))
+    assert "Good evening, Seth." in h and "Thursday, November 19" in h and "\n" not in h
+    assert 'aria-hidden="true"' in h and "<script" not in h
+    ui.OWNER, saved = "<b>x</b> & y", ui.OWNER
+    try:
+        assert "<b>x</b>" not in ui.welcome_html() and "&lt;b&gt;x&lt;/b&gt; &amp; y" in ui.welcome_html()
+    finally:
+        ui.OWNER = saved
+
+
+def test_hello_shows_once_per_session_after_the_styles():
+    state = {}
+    st, calls = run_apply("dark", state)
+    assert len(calls) == 2 and calls[0].args[0].startswith("<style>") and '<div class="ix-hello-big">' in calls[1].args[0]
+    assert "<style" not in calls[1].args[0]               # a style tag would make Streamlit hide this whole element
+    assert state["welcomed"] is True
+    st2, calls2 = run_apply("dark", state)                 # next page or rerun in the same session
+    assert len(calls2) == 1 and calls2[0].args[0].startswith("<style>") and '<div class="ix-hello"' not in calls2[0].args[0]
+
+
+def test_hello_never_blocks_clicks_and_respects_reduced_motion():
+    c = ui.css("dark")
+    rule = next(ln for ln in c.splitlines() if ln.startswith(".ix-hello {"))
+    assert "pointer-events: none" in rule and "position: fixed" in rule and "forwards" in rule
+    assert "prefers-reduced-motion" in c and "visibility: hidden" in c          # it ends fully hidden
+
+
+def test_hello_cover_matches_the_page_background():
+    assert ui.PALETTE["dark"]["bg"] == THEME["dark"]["backgroundColor"] and ui.PALETTE["light"]["bg"] == THEME["light"]["backgroundColor"]
+    assert ui.PALETTE["light"]["bg"] in ui.css("light") and ui.PALETTE["dark"]["bg"] in ui.css("dark")
+
+
+def test_a_broken_session_state_just_skips_the_hello():
+    st = MagicMock()
+    st.context.theme.type = "light"
+    st.session_state = MagicMock()
+    st.session_state.get.side_effect = RuntimeError("no session")
+    saved = sys.modules.get("streamlit")
+    sys.modules["streamlit"] = st
+    try:
+        ui.apply()
+    finally:
+        sys.modules["streamlit"] = saved
+    assert len(st.markdown.call_args_list) == 1
 
 
 def test_mode_defaults_to_dark_when_streamlit_cannot_say():

@@ -29,7 +29,7 @@ PALETTE = {
                  "linear-gradient(rgba(148,163,184,.035) 1px, transparent 1px),"
                  "linear-gradient(90deg, rgba(148,163,184,.035) 1px, transparent 1px)"),
         "page_size": "auto, auto, 46px 46px, 46px 46px",
-        "ok": "#2bb673", "warn": "#e8a317", "off": "#8b98ad", "info": "#38bdf8",
+        "ok": "#2bb673", "warn": "#e8a317", "off": "#8b98ad", "info": "#38bdf8", "bg": "#0b1120",
     },
     "light": {
         "accent": "#0369a1", "accent2": "#6d4fd6", "glow": "rgba(3,105,161,.22)",
@@ -40,7 +40,7 @@ PALETTE = {
         "page": ("radial-gradient(1000px 460px at 6% -14%, rgba(3,105,161,.08), transparent 62%),"
                  "radial-gradient(800px 400px at 100% -10%, rgba(109,79,214,.06), transparent 58%)"),
         "page_size": "auto, auto",
-        "ok": "#0b8a55", "warn": "#b7791f", "off": "#64748b", "info": "#0369a1",
+        "ok": "#0b8a55", "warn": "#b7791f", "off": "#64748b", "info": "#0369a1", "bg": "#f5f8fc",
     },
 }
 
@@ -98,14 +98,57 @@ button[data-baseweb="tab"] {{ font-weight: 600; letter-spacing: .01em; }}
 .ix-off i {{ background: {p['off']}; }}
 .ix-info i {{ background: {p['info']}; box-shadow: 0 0 8px {p['info']}; }}
 .ix-tile-note {{ color: {p['muted']}; font-size: .8rem; line-height: 1.45; margin: .15rem 0 0 0; }}
+.ix-hello {{ position: fixed; inset: 0; z-index: 999999; display: flex; align-items: center; justify-content: center; background: {p['bg']}; pointer-events: none; animation: ix-hello-bg 3.4s ease forwards; }}
+@keyframes ix-hello-bg {{ 0%, 70% {{ opacity: 1; visibility: visible; }} 100% {{ opacity: 0; visibility: hidden; }} }}
+.ix-hello-inner {{ text-align: center; padding: 0 1.5rem; animation: ix-hello-in 1.1s cubic-bezier(.2,.7,.2,1) both; }}
+@keyframes ix-hello-in {{ from {{ opacity: 0; transform: translateY(12px); filter: blur(5px); }} to {{ opacity: 1; transform: none; filter: none; }} }}
+.ix-hello-small {{ font-size: .78rem; font-weight: 700; letter-spacing: .24em; text-transform: uppercase; color: {p['accent']}; margin-bottom: .9rem; }}
+.ix-hello-big {{ font-family: 'Space Grotesk', Inter, system-ui, sans-serif; font-weight: 600; font-size: clamp(2rem, 6vw, 3.6rem); letter-spacing: -0.03em; line-height: 1.1; }}
+.ix-hello-rule {{ width: 0; height: 3px; margin: 1.2rem auto 0 auto; border-radius: 3px; background: linear-gradient(90deg, {p['accent']}, {p['accent2']}); animation: ix-hello-rule 1.1s .5s ease forwards; }}
+@keyframes ix-hello-rule {{ to {{ width: 84px; }} }}
+@media (prefers-reduced-motion: reduce) {{ .ix-hello {{ animation-duration: 1.6s; }} .ix-hello-inner {{ animation: none; }} .ix-hello-rule {{ animation: none; width: 84px; }} }}
 """
     return "\n".join(line for line in rules.splitlines() if line.strip())
 
 
 def apply() -> None:
-    """Inject the shared stylesheet. Call once per page, right after st.set_page_config."""
+    """Inject the shared stylesheet, and say hello once per visit. Call once per page, right after st.set_page_config."""
     import streamlit as st
     st.markdown(f"<style>\n{css(mode())}\n</style>", unsafe_allow_html=True)
+    welcome()
+
+
+OWNER = "Seth"
+
+
+def greeting(now: dt.datetime | None = None) -> tuple[str, str]:
+    """('Good evening, Seth.', 'Thursday, November 19') for the owner's clock (Central time)."""
+    now = now or dt.datetime.now(dt.timezone.utc)
+    try:
+        from zoneinfo import ZoneInfo
+        now = now.astimezone(ZoneInfo("America/Chicago"))
+    except Exception:
+        pass
+    word = "Good morning" if 5 <= now.hour < 12 else "Good afternoon" if 12 <= now.hour < 17 else "Good evening"
+    return f"{word}, {OWNER}.", f"{now.strftime('%A, %B')} {now.day}"
+
+
+def welcome_html(now: dt.datetime | None = None) -> str:
+    big, small = greeting(now)
+    return (f'<div class="ix-hello" aria-hidden="true"><div class="ix-hello-inner"><div class="ix-hello-small">{escape(small)}</div>'
+            f'<div class="ix-hello-big">{escape(big)}</div><div class="ix-hello-rule"></div></div></div>')
+
+
+def welcome(now: dt.datetime | None = None) -> None:
+    """A short fade-in hello, once per browser session (a reload counts as a new visit). It never blocks clicks."""
+    import streamlit as st
+    try:
+        if st.session_state.get("welcomed") is True:
+            return
+        st.session_state["welcomed"] = True
+    except Exception:
+        return
+    st.markdown(welcome_html(now), unsafe_allow_html=True)
 
 
 # ---------------------------------------------------------------- small HTML pieces (home page)
